@@ -1,14 +1,24 @@
 import numpy as np
 from sentence_transformers import SentenceTransformer
 import faiss
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Optional
+from src.config import MODEL_CACHE_DIR
 
 class EmbeddingIndex:
-    """Gerencia embeddings e índice FAISS."""
+    """Gerencia embeddings e índice FAISS com cache local."""
     
-    def __init__(self, model_name: str = "all-MiniLM-L6-v2"):
+    def __init__(
+        self, 
+        model_name: str = "all-MiniLM-L6-v2",
+        cache_dir: Optional[str] = None
+    ):
         self.model_name = model_name
-        self.model = SentenceTransformer(model_name)
+        self.cache_dir = cache_dir or MODEL_CACHE_DIR
+        # O SentenceTransformer aceita cache_folder para armazenar modelos
+        self.model = SentenceTransformer(
+            model_name,
+            cache_folder=self.cache_dir
+        )
         self.index = None
         self.chunks = []
         self.vectors = None
@@ -18,16 +28,14 @@ class EmbeddingIndex:
         self.chunks = chunks
         texts = [c['text'] for c in chunks]
         
-        print(f"🔄 Gerando embeddings para {len(texts)} chunks...")
+        print(f"🔄 Gerando embeddings para {len(texts)} chunks (cache em {self.cache_dir})...")
         self.vectors = self.model.encode(
             texts, 
             convert_to_numpy=True,
             show_progress_bar=True
         )
         
-        # Normaliza para similaridade por cosseno (Inner Product)
         faiss.normalize_L2(self.vectors)
-        
         dimension = self.vectors.shape[1]
         self.index = faiss.IndexFlatIP(dimension)
         self.index.add(self.vectors)

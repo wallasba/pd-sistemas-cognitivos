@@ -1,33 +1,56 @@
 from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
 import torch
-from typing import Tuple, Any
+from typing import Tuple, Any, Optional
+from src.config import MODEL_CACHE_DIR, USE_LOCAL_CACHE_ONLY
 
 def load_llm(
-    model_name: str = "Qwen/Qwen2.5-1.5B-Instruct",
+    model_name: str = "microsoft/Phi-3-mini-4k-instruct",
     device_map: str = "auto",
-    torch_dtype = None
+    torch_dtype = None,
+    cache_dir: Optional[str] = None
 ) -> Tuple[Any, Any]:
     """
     Carrega modelo de linguagem local via Hugging Face Transformers.
-    Retorna: (generator_pipeline, tokenizer)
-    """
-    print(f"🔄 Carregando modelo: {model_name}...")
+    Utiliza cache local para evitar redownloads.
     
-    if torch_dtype is None:
-        torch_dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float32
+    Args:
+        model_name: nome do modelo no Hub
+        device_map: estratégia de alocação de dispositivo
+        torch_dtype: tipo de dados (ex: torch.bfloat16)
+        cache_dir: diretório de cache (padrão: MODEL_CACHE_DIR)
+    
+    Returns:
+        (generator_pipeline, tokenizer)
+    """
+    if cache_dir is None:
+        cache_dir = MODEL_CACHE_DIR
+
+    print(f"🔄 Carregando modelo: {model_name} (cache em {cache_dir})...")
+    
+    # Configuração para modo offline (se desejado)
+    if USE_LOCAL_CACHE_ONLY:
+        print("⚠️  Modo offline ativado – apenas cache local será usado.")
+        # O Hugging Face respeita a variável de ambiente HF_OFFLINE=1
     
     tokenizer = AutoTokenizer.from_pretrained(
         model_name,
-        trust_remote_code=True
+        cache_dir=cache_dir,
+        trust_remote_code=True,
+        local_files_only=USE_LOCAL_CACHE_ONLY
     )
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     
+    if torch_dtype is None:
+        torch_dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float32
+    
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
+        cache_dir=cache_dir,
         device_map=device_map,
         torch_dtype=torch_dtype,
-        trust_remote_code=True
+        trust_remote_code=True,
+        local_files_only=USE_LOCAL_CACHE_ONLY
     )
     
     generator = pipeline(
@@ -40,26 +63,3 @@ def load_llm(
     
     print(f"✅ LLM carregado. Dispositivo: {model.device}")
     return generator, tokenizer
-
-def generate_text(
-    pipe: Any,
-    tokenizer: Any,
-    prompt: str,
-    max_new_tokens: int = 512,
-    temperature: float = 0.7,
-    top_p: float = 0.95
-) -> str:
-    """Gera texto com parâmetros controlados."""
-    outputs = pipe(
-        prompt,
-        max_new_tokens=max_new_tokens,
-        temperature=temperature,
-        do_sample=True,
-        top_p=top_p,
-        eos_token_id=tokenizer.eos_token_id,
-    )
-    raw = outputs[0]['generated_text']
-    # Remove o prompt da resposta
-    if prompt in raw:
-        return raw.replace(prompt, "").strip()
-    return raw.strip()
