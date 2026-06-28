@@ -1,3 +1,4 @@
+import pandas as pd
 from typing import List, Dict, Any
 
 def prepare_chunks(
