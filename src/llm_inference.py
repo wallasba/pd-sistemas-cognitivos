@@ -3,7 +3,7 @@ import torch
 from typing import Tuple, Any
 
 def load_llm(
-    model_name: str = "microsoft/Phi-3-mini-4k-instruct",
+    model_name: str = "Qwen/Qwen2.5-1.5B-Instruct",
     device_map: str = "auto",
     torch_dtype = None
 ) -> Tuple[Any, Any]:
