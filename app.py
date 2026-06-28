@@ -15,7 +15,7 @@ st.set_page_config(
 # TÍTULO E DESCRIÇÃO PRINCIPAL
 # =====================================================
 st.title("🤖 Assistente de Pesquisa em Inteligência Artificial")
-st.caption("Baseado em 1.160 artigos científicos de 7 repositórios (arXiv, OpenAlex, PubMed, Crossref, Europe PMC, Zenodo, DOAJ).")
+st.caption("Baseado em artigos científicos de 7 repositórios (arXiv, OpenAlex, PubMed, Crossref, Europe PMC, Zenodo, DOAJ).")
 
 # =====================================================
 # SEÇÃO DE INSTRUÇÕES (MAPA DE INSTRUÇÕES)
