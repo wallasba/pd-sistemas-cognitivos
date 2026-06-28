@@ -3,10 +3,11 @@ from src.chunking import prepare_chunks
 from src.embeddings import EmbeddingIndex
 from src.llm_inference import load_llm, generate_text
 from src.prompt_builder import build_prompt
-from src.config import MODEL_CACHE_DIR
 from typing import Dict, Any, List, Optional
 
 class RAGPipeline:
+    """Pipeline RAG completo: indexação + recuperação + geração."""
+    
     def __init__(
         self,
         corpus_path: str,
@@ -14,10 +15,8 @@ class RAGPipeline:
         embedding_model_name: str = "all-MiniLM-L6-v2",
         chunk_size: int = 300,
         chunk_overlap: int = 50,
-        k_retrieval: int = 5,
-        cache_dir: Optional[str] = None
+        k_retrieval: int = 5
     ):
-        self.cache_dir = cache_dir or MODEL_CACHE_DIR
         self.llm_model_name = llm_model_name
         self.k_retrieval = k_retrieval
         
@@ -29,17 +28,14 @@ class RAGPipeline:
         print("[2/4] Preparando chunks...")
         self.chunks = prepare_chunks(self.df, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
         
-        # 3. Constrói índice de embeddings (usando cache)
+        # 3. Constrói índice de embeddings (SEM cache_dir)
         print("[3/4] Construindo índice de embeddings...")
-        self.embed_index = EmbeddingIndex(embedding_model_name, cache_dir=self.cache_dir)
+        self.embed_index = EmbeddingIndex(model_name=embedding_model_name)
         self.embed_index.build_index(self.chunks)
         
-        # 4. Carrega LLM (usando cache)
+        # 4. Carrega LLM
         print("[4/4] Carregando LLM...")
-        self.llm_pipe, self.tokenizer = load_llm(
-            llm_model_name,
-            cache_dir=self.cache_dir
-        )
+        self.llm_pipe, self.tokenizer = load_llm(llm_model_name)
         
         print("✅ Pipeline RAG pronto!")
     

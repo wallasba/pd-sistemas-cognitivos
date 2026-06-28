@@ -1,24 +1,21 @@
 import numpy as np
 from sentence_transformers import SentenceTransformer
 import faiss
-from typing import List, Dict, Any, Optional
-from src.config import MODEL_CACHE_DIR
+from typing import List, Dict, Any, Tuple, Optional
+import pickle
+import os
 
 class EmbeddingIndex:
-    """Gerencia embeddings e índice FAISS com cache local."""
+    """Gerencia embeddings e índice FAISS."""
     
-    def __init__(
-        self, 
-        model_name: str = "all-MiniLM-L6-v2",
-        cache_dir: Optional[str] = None
-    ):
+    def __init__(self, model_name: str = "all-MiniLM-L6-v2"):
+        """
+        Inicializa o modelo de embeddings.
+        O modelo será baixado automaticamente do Hugging Face Hub.
+        """
         self.model_name = model_name
-        self.cache_dir = cache_dir or MODEL_CACHE_DIR
-        # O SentenceTransformer aceita cache_folder para armazenar modelos
-        self.model = SentenceTransformer(
-            model_name,
-            cache_folder=self.cache_dir
-        )
+        # SEM cache_folder - usa o cache padrão do HF (ex: ~/.cache/huggingface/)
+        self.model = SentenceTransformer(model_name)
         self.index = None
         self.chunks = []
         self.vectors = None
@@ -28,14 +25,16 @@ class EmbeddingIndex:
         self.chunks = chunks
         texts = [c['text'] for c in chunks]
         
-        print(f"🔄 Gerando embeddings para {len(texts)} chunks (cache em {self.cache_dir})...")
+        print(f"🔄 Gerando embeddings para {len(texts)} chunks...")
         self.vectors = self.model.encode(
             texts, 
             convert_to_numpy=True,
             show_progress_bar=True
         )
         
+        # Normaliza para similaridade por cosseno (Inner Product)
         faiss.normalize_L2(self.vectors)
+        
         dimension = self.vectors.shape[1]
         self.index = faiss.IndexFlatIP(dimension)
         self.index.add(self.vectors)
@@ -66,14 +65,12 @@ class EmbeddingIndex:
         if self.index is None:
             raise ValueError("Índice vazio.")
         faiss.write_index(self.index, f"{path}.faiss")
-        import pickle
         with open(f"{path}_meta.pkl", 'wb') as f:
             pickle.dump({'chunks': self.chunks, 'model_name': self.model_name}, f)
         print(f"✅ Índice salvo em {path}")
     
     def load_index(self, path: str) -> None:
         """Carrega índice e metadados."""
-        import pickle
         self.index = faiss.read_index(f"{path}.faiss")
         with open(f"{path}_meta.pkl", 'rb') as f:
             data = pickle.load(f)
