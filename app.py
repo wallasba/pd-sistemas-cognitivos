@@ -4,12 +4,11 @@ from src.rag_pipeline import RAGPipeline
 st.set_page_config(page_title="Assistente de Pesquisa em IA", layout="wide")
 st.title("🤖 Assistente de Pesquisa em Inteligência Artificial")
 
-# Carrega o pipeline (usa cache do Streamlit para não recarregar a cada interação)
 @st.cache_resource
 def load_pipeline():
     return RAGPipeline(
         corpus_path="./data/corpus_ia.csv",
-        llm_model_name="microsoft/Phi-3-mini-4k-instruct",
+        llm_model_name="HuggingFaceTB/SmolLM2-360M-Instruct",
         embedding_model_name="all-MiniLM-L6-v2",
         chunk_size=300,
         chunk_overlap=50,

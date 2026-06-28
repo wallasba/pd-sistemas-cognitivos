@@ -61,9 +61,9 @@ def generate_text(
     pipe: Any,
     tokenizer: Any,
     prompt: str,
-    max_new_tokens: int = 512,
-    temperature: float = 0.7,
-    top_p: float = 0.95,
+    max_new_tokens: int = 256,
+    temperature: float = 0.6,
+    top_p: float = 0.9,
     do_sample: bool = True,
 ) -> str:
     """
