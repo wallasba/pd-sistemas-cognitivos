@@ -1,0 +1,3 @@
+vincular o projeto anterior com o projeto atual de modo a selecionar a query de pesquisa. Flixibilizar o grafo, ou criar vários grafos, para principais instituições,
+autores e palabras chaves, de modo a rastrear os tópicos principais. Os exemplos na máscara do streamlit deve incentivar a busca conforme as princiapis necessidades de um pesquisador sênior,
+de modo a viabilizar o projeto em aplicações reais e escaláveis, como a principais tendências de pesquisa etc. de modo a fundamentar o estado da arte de uma pesquisa acadêmica de alto impacto. 

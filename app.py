@@ -5,7 +5,7 @@ from src.rag_pipeline import RAGPipeline
 # CONFIGURAÇÃO DA PÁGINA
 # =====================================================
 st.set_page_config(
-    page_title="Assistente de Pesquisa em IA",
+    page_title="Assistente de Pesquisa",
     page_icon="🤖",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -14,7 +14,7 @@ st.set_page_config(
 # =====================================================
 # TÍTULO E DESCRIÇÃO PRINCIPAL
 # =====================================================
-st.title("🤖 Assistente de Pesquisa em Inteligência Artificial")
+st.title("🤖 Assistente de Pesquisa")
 st.caption("Baseado em artigos científicos de 7 repositórios (arXiv, OpenAlex, PubMed, Crossref, Europe PMC, Zenodo, DOAJ).")
 
 # =====================================================
@@ -23,7 +23,7 @@ st.caption("Baseado em artigos científicos de 7 repositórios (arXiv, OpenAlex,
 with st.expander("📖 Como usar este assistente - Mapa de Instruções", expanded=False):
     st.markdown("""
     ### 🎯 Objetivo
-    Este assistente permite que você faça perguntas em **linguagem natural** sobre o corpus de artigos de IA.  
+    Este assistente permite que você faça perguntas em **linguagem natural** sobre o corpus de artigos científicos.  
     Ele usa um pipeline RAG (Recuperação + Geração) para buscar os trechos mais relevantes e gerar uma resposta fundamentada.
 
     ---
@@ -39,7 +39,7 @@ with st.expander("📖 Como usar este assistente - Mapa de Instruções", expand
     ---
 
     ### 💬 Como fazer uma pergunta
-    1. Digite sua pergunta no campo de chat (ex: *"Quais são as aplicações de deep learning em imagens médicas?"*).
+    1. Digite sua pergunta no campo de chat (ex: *"Quais são as aplicações de deep learning na infraestrutura de transportes?"*).
     2. Pressione Enter ou clique no ícone de enviar.
     3. Aguarde enquanto o sistema recupera os trechos relevantes e gera a resposta.
 
@@ -64,12 +64,12 @@ with st.expander("📖 Como usar este assistente - Mapa de Instruções", expand
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        if st.button("🧠 IA em saúde", key="ex1", use_container_width=True):
-            st.session_state.query_mask = "Quais são as principais aplicações de inteligência artificial na área da saúde, mencionadas nos artigos?"
+        if st.button("🧠 Principais aplicações de IA", key="ex1", use_container_width=True):
+            st.session_state.query_mask = "Quais são as principais aplicações de inteligência artificial mencionadas nos artigos?"
             st.rerun()
         
-        if st.button("📊 Tendências 2023", key="ex2", use_container_width=True):
-            st.session_state.query_mask = "Quais foram os tópicos de IA mais pesquisados em 2023 segundo o corpus?"
+        if st.button("📊 Tendências", key="ex2", use_container_width=True):
+            st.session_state.query_mask = "Quais foram os tópicos de IA mais pesquisados segundo o corpus?"
             st.rerun()
     
     with col2:
@@ -78,7 +78,7 @@ with st.expander("📖 Como usar este assistente - Mapa de Instruções", expand
             st.rerun()
         
         if st.button("🤖 Aprendizado por Reforço", key="ex4", use_container_width=True):
-            st.session_state.query_mask = "Quais são as limitações e avanços do aprendizado por reforço para robótica?"
+            st.session_state.query_mask = "Quais são as limitações e avanços do aprendizado por reforço para a engenharia civil?"
             st.rerun()
     
     with col3:
