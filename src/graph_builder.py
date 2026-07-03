@@ -6,11 +6,13 @@ from sklearn.feature_extraction.text import CountVectorizer
 import re
 
 def build_coauthorship_graph(df: pd.DataFrame, min_coauthors: int = 2) -> nx.Graph:
-    """Nós = autores; arestas = colaboração (peso = número de artigos em coautoria)."""
     G = nx.Graph()
     for _, row in df.iterrows():
         authors = row.get('authors', '')
-        if not authors:
+        # Garantir que é string
+        if not isinstance(authors, str):
+            authors = str(authors) if authors else ''
+        if not authors.strip():
             continue
         author_list = [a.strip() for a in authors.split(',') if a.strip()]
         if len(author_list) < min_coauthors:
@@ -22,19 +24,21 @@ def build_coauthorship_graph(df: pd.DataFrame, min_coauthors: int = 2) -> nx.Gra
                     G[u][v]['weight'] += 1
                 else:
                     G.add_edge(u, v, weight=1)
-    # Remove nós isolados
     G.remove_nodes_from([n for n, d in G.degree() if d == 0])
     return G
 
 def build_institution_collaboration_graph(df: pd.DataFrame) -> nx.Graph:
-    """Nós = instituições; arestas = colaboração (autores de instituições diferentes no mesmo artigo)."""
     G = nx.Graph()
     for _, row in df.iterrows():
         affs = row.get('affiliations', [])
+        # Se for string, converte para lista (ex: "MIT; Stanford" -> ["MIT", "Stanford"])
+        if isinstance(affs, str):
+            affs = [a.strip() for a in affs.split(';') if a.strip()]
+        elif not isinstance(affs, list):
+            affs = []
         if not affs or len(affs) < 2:
             continue
-        # Remove duplicatas e vazios
-        inst_list = list(set([a for a in affs if a]))
+        inst_list = list(set(affs))
         for i in range(len(inst_list)):
             for j in range(i+1, len(inst_list)):
                 u, v = inst_list[i], inst_list[j]
