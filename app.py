@@ -1,235 +1,267 @@
 import streamlit as st
-from src.rag_pipeline import RAGPipeline
-
-# =====================================================
-# CONFIGURAÇÃO DA PÁGINA
-# =====================================================
-st.set_page_config(
-    page_title="Assistente de Pesquisa",
-    page_icon="🤖",
-    layout="wide",
-    initial_sidebar_state="expanded"
+import pandas as pd
+import os
+from src.data_collector import collect_articles
+from src.preprocessor import preprocess_abstracts
+from src.analyzer import get_stats, generate_wordcloud, plot_distributions
+from src.graph_builder import (
+    build_coauthorship_graph,
+    build_institution_collaboration_graph,
+    build_term_institution_graph
 )
+from src.rag_pipeline import RAGPipeline
+import matplotlib.pyplot as plt
+from pyvis.network import Network
+import streamlit.components.v1 as components
+import tempfile
+import time
 
-# =====================================================
-# TÍTULO E DESCRIÇÃO PRINCIPAL
-# =====================================================
-st.title("🤖 Assistente de Pesquisa")
-st.caption("Baseado em artigos científicos de 7 repositórios (arXiv, OpenAlex, PubMed, Crossref, Europe PMC, Zenodo, DOAJ).")
+st.set_page_config(page_title="Assistente de Pesquisa IA - Integrado", layout="wide")
+st.title("🔬 Assistente de Pesquisa em Inteligência Artificial")
 
-# =====================================================
-# SEÇÃO DE INSTRUÇÕES (MAPA DE INSTRUÇÕES)
-# =====================================================
-with st.expander("📖 Como usar este assistente - Mapa de Instruções", expanded=False):
-    st.markdown("""
-    ### 🎯 Objetivo
-    Este assistente permite que você faça perguntas em **linguagem natural** sobre o corpus de artigos científicos.  
-    Ele usa um pipeline RAG (Recuperação + Geração) para buscar os trechos mais relevantes e gerar uma resposta fundamentada.
+# ============================================================
+# Inicialização do session_state
+# ============================================================
+if 'df' not in st.session_state:
+    st.session_state.df = None
+if 'rag_pipeline' not in st.session_state:
+    st.session_state.rag_pipeline = None
 
-    ---
+# ============================================================
+# Máscaras de busca (placeholders para pesquisador sênior)
+# ============================================================
+MASKS = {
+    "Deep Learning em Saúde": '"deep learning" AND ("medical" OR "health")',
+    "PLN e Transformers": '"natural language processing" AND ("transformer" OR "BERT")',
+    "IA na Educação": '"artificial intelligence" AND "education"',
+    "Robótica e Aprendizado por Reforço": '"reinforcement learning" AND "robotics"',
+    "Ética em IA": '"AI ethics" OR "bias"',
+    "Tendências em IA (2023)": '"artificial intelligence" AND "2023"'
+}
 
-    ### 🛠️ Configurações (Barra Lateral)
-    - **Técnica de Prompt**: 
-      - `Zero-Shot`: Pergunta direta, sem exemplos.
-      - `Few-Shot`: Fornece exemplos de perguntas e respostas ideais (melhor para perguntas específicas).
-      - `Chain-of-Thought`: Pede que o modelo raciocine passo a passo (útil para perguntas complexas).
-    - **Chunks recuperados (k)**: Número de trechos de artigos usados como contexto (quanto maior, mais informação, mas pode diluir a resposta).
-    - **Temperatura**: Controla a criatividade da resposta (0.0 = mais precisa/factual; 1.0 = mais criativa/divergente).
-
-    ---
-
-    ### 💬 Como fazer uma pergunta
-    1. Digite sua pergunta no campo de chat (ex: *"Quais são as aplicações de deep learning na infraestrutura de transportes?"*).
-    2. Pressione Enter ou clique no ícone de enviar.
-    3. Aguarde enquanto o sistema recupera os trechos relevantes e gera a resposta.
-
-    ---
-
-    ### 📚 Entendendo a resposta
-    - **Resposta principal**: Texto gerado pelo modelo com base nos trechos recuperados.
-    - **Expansor "📚 Ver trechos recuperados"**: Mostra os trechos exatos dos artigos usados como fonte, com o **score de similaridade** (quanto maior, mais relevante).
-    - Se a resposta disser que não encontrou informação, tente reformular a pergunta com termos mais específicos.
-
-    ---
-
-    ### 💡 Exemplos de perguntas (use as máscaras abaixo ou copie e cole)
-    Abaixo estão perguntas pré-definidas para testar rapidamente o sistema. Clique em **"Usar esta pergunta"** para preenchê-la automaticamente no chat.
-    """)
-
-    # =====================================================
-    # MÁSCARAS DE CONSULTA (TEMPLATES)
-    # =====================================================
-    st.markdown("#### 🔍 Máscaras de Consulta (Exemplos)")
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        if st.button("🧠 Principais aplicações de IA", key="ex1", use_container_width=True):
-            st.session_state.query_mask = "Quais são as principais aplicações de inteligência artificial mencionadas nos artigos?"
-            st.rerun()
-        
-        if st.button("📊 Tendências", key="ex2", use_container_width=True):
-            st.session_state.query_mask = "Quais foram os tópicos de IA mais pesquisados segundo o corpus?"
-            st.rerun()
-    
-    with col2:
-        if st.button("🧬 PLN com Transformers", key="ex3", use_container_width=True):
-            st.session_state.query_mask = "O que os artigos dizem sobre o uso de transformers em processamento de linguagem natural?"
-            st.rerun()
-        
-        if st.button("🤖 Aprendizado por Reforço", key="ex4", use_container_width=True):
-            st.session_state.query_mask = "Quais são as limitações e avanços do aprendizado por reforço para a engenharia civil?"
-            st.rerun()
-    
-    with col3:
-        if st.button("🏥 Ética em IA", key="ex5", use_container_width=True):
-            st.session_state.query_mask = "Questões éticas e de viés em IA são discutidas nos artigos do corpus?"
-            st.rerun()
-        
-        if st.button("📈 Modelos Preditivos", key="ex6", use_container_width=True):
-            st.session_state.query_mask = "Quais técnicas de modelagem preditiva e estatística são mais citadas?"
-            st.rerun()
-    
-    st.markdown("---")
-    st.info("💡 **Dica:** Você pode copiar qualquer uma das perguntas acima e colar no chat, ou clicar no botão para preenchê-la automaticamente.")
-
-# =====================================================
-# CARREGAMENTO DO PIPELINE (CACHEADO)
-# =====================================================
-@st.cache_resource
-def load_pipeline():
-    return RAGPipeline(
-        corpus_path="./data/corpus_ia.csv",
-        llm_model_name="HuggingFaceTB/SmolLM2-360M-Instruct",  # Modelo leve
-        embedding_model_name="all-MiniLM-L6-v2",
-        chunk_size=300,
-        chunk_overlap=50,
-        k_retrieval=5
-    )
-
-if 'pipeline' not in st.session_state:
-    with st.spinner("⏳ Carregando modelos (pode levar alguns minutos na primeira execução)..."):
-        st.session_state.pipeline = load_pipeline()
-        st.success("✅ Pipeline carregado com sucesso!")
-
-# =====================================================
-# BARRA LATERAL - GUIA RÁPIDO E CONFIGURAÇÕES
-# =====================================================
+# ============================================================
+# SIDEBAR – Informações e estados
+# ============================================================
 with st.sidebar:
-    st.header("⚙️ Configurações")
-    
-    st.markdown("""
-    **📌 Guia Rápido**
-    - Ajuste os parâmetros abaixo para controlar a qualidade e o comportamento das respostas.
-    - Consulte a seção **"📖 Como usar"** na página principal para mais detalhes.
-    """)
-    
-    prompt_type = st.selectbox(
-        "Técnica de Prompt",
-        ["zero_shot", "few_shot", "cot"],
-        format_func=lambda x: {
-            "zero_shot": "Zero-Shot (direto)",
-            "few_shot": "Few-Shot (com exemplos)",
-            "cot": "Chain-of-Thought (raciocínio)"
-        }[x],
-        help="Zero-Shot: pergunta direta. Few-Shot: inclui exemplos. CoT: raciocínio passo a passo."
-    )
-    
-    k = st.slider(
-        "Chunks recuperados (k)", 
-        min_value=1, 
-        max_value=10, 
-        value=5,
-        help="Número de trechos de artigos usados como contexto. Valores mais altos trazem mais informação, mas podem diluir a precisão."
-    )
-    
-    temperature = st.slider(
-        "Temperatura", 
-        min_value=0.0, 
-        max_value=1.0, 
-        value=0.6, 
-        step=0.1,
-        help="0.0 = respostas mais precisas/factuais. 1.0 = mais criativas/divergentes."
-    )
-    
+    st.header("📊 Status")
+    if st.session_state.df is not None:
+        st.success(f"Corpus carregado: {len(st.session_state.df)} artigos")
+    else:
+        st.warning("Nenhum corpus carregado.")
     st.divider()
+    st.caption("Desenvolvido para pesquisadores seniores.")
+
+# ============================================================
+# ABA 1: COLETA
+# ============================================================
+tab1, tab2, tab3, tab4 = st.tabs(["📥 Coleta", "📈 Análise", "🕸️ Grafos", "💬 Chat RAG"])
+
+with tab1:
+    st.header("1️⃣ Definição da Consulta")
+    # Placeholder com máscaras
+    mask_option = st.selectbox("Escolha uma máscara de exemplo (ou digite sua própria query):",
+                               ["(Personalizada)"] + list(MASKS.keys()))
+    if mask_option != "(Personalizada)":
+        query_placeholder = MASKS[mask_option]
+    else:
+        query_placeholder = '"artificial intelligence" AND "civil engineering"'
     
-    st.caption("""
-    **Sobre o sistema:**
-    - 🤖 Modelo: SmolLM2-360M-Instruct (local)
-    - 🔍 Embeddings: all-MiniLM-L6-v2
-    - 📂 Busca: FAISS (similaridade por cosseno)
-    - 🔒 100% local, sem APIs externas
-    """)
-
-# =====================================================
-# INICIALIZAÇÃO DO HISTÓRICO DE MENSAGENS
-# =====================================================
-if 'messages' not in st.session_state:
-    st.session_state.messages = [
-        {"role": "assistant", "content": "Olá! Sou seu assistente de pesquisa. Pergunte-me sobre tendências, métodos ou artigos específicos do corpus de IA.\n\n💡 *Experimente usar uma das máscaras de consulta acima ou digite sua própria pergunta.*"}
-    ]
-
-# =====================================================
-# EXIBIÇÃO DO HISTÓRICO
-# =====================================================
-for msg in st.session_state.messages:
-    with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
-
-# =====================================================
-# GERENCIAMENTO DA MÁSCARA (QUERY MASK)
-# =====================================================
-# Se o usuário clicou em um botão de máscara, preenche o prompt
-if 'query_mask' in st.session_state and st.session_state.query_mask:
-    prompt = st.session_state.query_mask
-    st.session_state.query_mask = None  # Reseta após usar
-else:
-    prompt = st.chat_input("Digite sua pergunta sobre o corpus de IA...")
-
-# =====================================================
-# PROCESSAMENTO DA CONSULTA
-# =====================================================
-if prompt:
-    # Adiciona pergunta do usuário ao histórico
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"):
-        st.markdown(prompt)
+    query = st.text_input("Query de pesquisa (use AND, OR, NOT e aspas):",
+                          value=query_placeholder,
+                          help="Exemplo: 'machine learning' AND 'healthcare' NOT 'robotics'")
     
-    # Gera a resposta
-    with st.chat_message("assistant"):
-        with st.spinner("🔍 Pesquisando no corpus e gerando resposta..."):
-            try:
-                result = st.session_state.pipeline.answer(
-                    query=prompt,
-                    prompt_type=prompt_type,
-                    k=k,
-                    temperature=temperature
+    col1, col2 = st.columns(2)
+    with col1:
+        year_start = st.slider("Ano inicial", 2000, 2026, 2015)
+        year_end = st.slider("Ano final", 2000, 2026, 2023)
+    with col2:
+        max_results = st.slider("Máximo de artigos por fonte", 100, 1000, 300, step=50)
+        sources = st.multiselect(
+            "Fontes (selecione uma ou mais)",
+            ['arxiv', 'openalex', 'pubmed'],
+            default=['arxiv', 'openalex']
+        )
+    
+    st.caption("💡 Para fontes adicionais (Crossref, Zenodo, etc.), consulte a documentação.")
+    
+    # Botão para coletar
+    if st.button("🚀 Coletar Artigos", type="primary"):
+        if not query or not sources:
+            st.warning("Preencha a query e selecione pelo menos uma fonte.")
+        else:
+            with st.spinner("Coletando dados – pode levar alguns minutos..."):
+                df_raw = collect_articles(
+                    query=query,
+                    sources=sources,
+                    max_results=max_results,
+                    year_start=year_start,
+                    year_end=year_end
                 )
-                
-                # Exibe a resposta
-                st.markdown(result['answer'])
-                
-                # Expansor com o contexto recuperado (transparência)
-                with st.expander("📚 Ver trechos recuperados (contexto)"):
-                    if result['retrieved_context']:
-                        for i, r in enumerate(result['retrieved_context']):
-                            st.caption(f"**Trecho {i+1}** (Score: {r['score']:.4f})")
-                            st.caption(f"*Fonte:* {r['metadata'].get('title', 'Sem título')}")
-                            st.text(r['chunk'][:500] + "..." if len(r['chunk']) > 500 else r['chunk'])
-                            st.divider()
-                    else:
-                        st.info("Nenhum trecho recuperado para esta consulta.")
-                
-                # Adiciona resposta ao histórico
-                st.session_state.messages.append({"role": "assistant", "content": result['answer']})
-            
-            except Exception as e:
-                st.error(f"⚠️ Erro ao processar a consulta: {e}")
-                st.stop()
+                if df_raw.empty:
+                    st.error("Nenhum artigo encontrado. Tente ajustar a query ou período.")
+                else:
+                    # Pré-processa
+                    df = preprocess_abstracts(df_raw)
+                    st.session_state.df = df
+                    st.success(f"✅ {len(df)} artigos coletados e pré-processados!")
+                    
+                    # Salva em cache (opcional)
+                    df.to_csv("data/corpus_cache.csv", index=False)
+                    st.info("Corpus salvo em cache (data/corpus_cache.csv).")
+    
+    # Opção para carregar corpus existente
+    st.divider()
+    st.subheader("📂 Carregar corpus existente")
+    uploaded_file = st.file_uploader("Carregue um arquivo CSV (ex: corpus_ia.csv)", type=['csv'])
+    if uploaded_file is not None:
+        df_raw = pd.read_csv(uploaded_file)
+        df = preprocess_abstracts(df_raw)
+        st.session_state.df = df
+        st.success(f"✅ Corpus carregado: {len(df)} artigos.")
 
-# =====================================================
-# RODAPÉ
-# =====================================================
-st.sidebar.divider()
-st.sidebar.caption("📚 Projeto de Sistemas Cognitivos com LLMs - 2026")
+# ============================================================
+# ABA 2: ANÁLISE
+# ============================================================
+with tab2:
+    if st.session_state.df is not None:
+        df = st.session_state.df
+        st.subheader("📊 Estatísticas Descritivas")
+        stats = get_stats(df)
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Total de artigos", stats['total'])
+        col2.metric("Fontes distintas", len(stats['sources']))
+        col3.metric("Período", f"{min(stats['years'])} - {max(stats['years'])}")
+        
+        # Gráficos
+        fig = plot_distributions(df)
+        st.pyplot(fig)
+        
+        # Nuvem de palavras
+        st.subheader("☁️ Nuvem de Palavras")
+        wc = generate_wordcloud(df)
+        fig_wc, ax = plt.subplots(figsize=(10,5))
+        ax.imshow(wc, interpolation='bilinear')
+        ax.axis('off')
+        st.pyplot(fig_wc)
+    else:
+        st.info("Nenhum corpus carregado. Vá para a aba 'Coleta'.")
+
+# ============================================================
+# ABA 3: GRAFOS
+# ============================================================
+with tab3:
+    if st.session_state.df is not None:
+        df = st.session_state.df
+        st.subheader("🕸️ Grafos de Conhecimento")
+        st.markdown("""
+        **Clique nos botões abaixo para gerar diferentes tipos de grafos interativos:**
+        - **Coautoria**: autores que publicaram juntos.
+        - **Instituições**: colaboração entre instituições.
+        - **Termos × Instituições**: termos frequentes associados a instituições.
+        """)
+        
+        col_grafos = st.columns(3)
+        with col_grafos[0]:
+            if st.button("📌 Gerar Grafo de Coautoria"):
+                with st.spinner("Construindo grafo de coautoria..."):
+                    G = build_coauthorship_graph(df, min_coauthors=2)
+                    if G.number_of_nodes() == 0:
+                        st.warning("Nenhuma coautoria encontrada.")
+                    else:
+                        # Converte para PyVis
+                        net = Network(height="600px", width="100%", notebook=False)
+                        net.from_nx(G)
+                        net.show("graph_coauthorship.html")
+                        with open("graph_coauthorship.html", "r", encoding="utf-8") as f:
+                            html = f.read()
+                        components.html(html, height=700)
+        
+        with col_grafos[1]:
+            if st.button("🏛️ Gerar Grafo de Instituições"):
+                with st.spinner("Construindo grafo de instituições..."):
+                    G = build_institution_collaboration_graph(df)
+                    if G.number_of_nodes() == 0:
+                        st.warning("Nenhuma colaboração entre instituições encontrada.")
+                    else:
+                        net = Network(height="600px", width="100%", notebook=False)
+                        net.from_nx(G)
+                        net.show("graph_institutions.html")
+                        with open("graph_institutions.html", "r", encoding="utf-8") as f:
+                            html = f.read()
+                        components.html(html, height=700)
+        
+        with col_grafos[2]:
+            if st.button("🔗 Gerar Grafo Termos × Instituições"):
+                with st.spinner("Construindo grafo termos-instituições..."):
+                    G = build_term_institution_graph(df, top_terms=30)
+                    if G.number_of_nodes() == 0:
+                        st.warning("Nenhuma relação termo-instituição encontrada.")
+                    else:
+                        net = Network(height="600px", width="100%", notebook=False)
+                        net.from_nx(G)
+                        net.show("graph_terms_institutions.html")
+                        with open("graph_terms_institutions.html", "r", encoding="utf-8") as f:
+                            html = f.read()
+                        components.html(html, height=700)
+    else:
+        st.info("Nenhum corpus carregado para gerar grafos.")
+
+# ============================================================
+# ABA 4: CHAT RAG
+# ============================================================
+with tab4:
+    st.subheader("💬 Assistente de Pesquisa (RAG)")
+    st.markdown("""
+    Faça perguntas em linguagem natural sobre o corpus. O assistente usará os artigos coletados para fundamentar suas respostas.
+    """)
+    
+    if st.session_state.df is not None and not st.session_state.df.empty:
+        # Inicializa o pipeline RAG se ainda não existir
+        if st.session_state.rag_pipeline is None:
+            with st.spinner("Carregando o pipeline RAG (embeddings + LLM) – primeira vez pode demorar..."):
+                # Salva o corpus limpo em um CSV temporário para o RAG
+                temp_csv = tempfile.NamedTemporaryFile(suffix=".csv", delete=False)
+                st.session_state.df[['title', 'abstract_clean', 'source', 'year']].to_csv(temp_csv.name, index=False)
+                temp_csv.close()
+                try:
+                    st.session_state.rag_pipeline = RAGPipeline(
+                        corpus_path=temp_csv.name,
+                        llm_model_name="HuggingFaceTB/SmolLM2-360M-Instruct",
+                        embedding_model_name="all-MiniLM-L6-v2"
+                    )
+                    st.success("Pipeline RAG carregado!")
+                except Exception as e:
+                    st.error(f"Erro ao carregar RAG: {e}")
+        
+        # Interface de chat
+        if st.session_state.rag_pipeline is not None:
+            # Máscaras de perguntas para pesquisador sênior
+            question_masks = [
+                "Quais são as principais instituições que publicam sobre deep learning?",
+                "Quem são os autores mais prolíficos na área de PLN?",
+                "Quais termos estão mais associados à instituição MIT?",
+                "Quais as tendências recentes (2023) em IA?",
+                "Como a IA está sendo aplicada na saúde?",
+                "Quais são os desafios éticos mencionados nos artigos?"
+            ]
+            selected_question = st.selectbox("Escolha uma pergunta de exemplo (ou digite a sua):",
+                                             ["(Digitar própria)"] + question_masks)
+            user_question = st.text_input("Sua pergunta:", 
+                                          value="" if selected_question == "(Digitar própria)" else selected_question)
+            
+            if st.button("Enviar pergunta"):
+                if user_question and st.session_state.rag_pipeline:
+                    with st.spinner("Processando..."):
+                        result = st.session_state.rag_pipeline.answer(user_question)
+                        st.markdown("**Resposta:**")
+                        st.write(result['answer'])
+                        with st.expander("📚 Ver trechos recuperados"):
+                            for i, ctx in enumerate(result['retrieved_context']):
+                                st.caption(f"Trecho {i+1} (score: {ctx['score']:.4f})")
+                                st.caption(f"Fonte: {ctx['metadata']['title']}")
+                                st.text(ctx['chunk'][:300] + "...")
+                                st.divider()
+                else:
+                    st.warning("Digite uma pergunta.")
+    else:
+        st.info("Carregue um corpus na aba 'Coleta' para usar o chat RAG.")
