@@ -292,23 +292,30 @@ def render_wizard():
                 with col_a:
                     node_metric = st.selectbox(
                         "Tamanho do nó baseado em:",
-                        ["degree", "betweenness", "closeness", "uniform"],
+                        ["degree", "betweenness", "closeness", "frequency", "uniform"],
                         format_func=lambda x: {
                             "degree": "Grau (conexões)",
                             "betweenness": "Betweenness (centralidade)",
                             "closeness": "Closeness (proximidade)",
+                            "frequency": "Frequência (produtividade)",
                             "uniform": "Uniforme (fixo)"
                         }[x],
                         key="node_metric_vis"
                     )
-                    node_scale = st.slider("Fator de escala dos nós", 0.5, 3.0, 1.0, 0.1, key="node_scale_vis")
-                    node_min_size = st.slider("Tamanho mínimo do nó", 5, 30, 10, key="node_min_vis")
-                    node_max_size = st.slider("Tamanho máximo do nó", 30, 120, 80, key="node_max_vis")
+                    node_scale = st.slider(
+                        "Multiplicador de tamanho dos nós", 
+                        0.5, 2.5, 1.0, 0.1, 
+                        key="node_scale_vis",
+                        help="1.0 = escala automática; >1 amplia, <1 reduz."
+                    )
                 
                 with col_b:
-                    edge_scale = st.slider("Fator de escala das arestas", 0.5, 3.0, 1.5, 0.1, key="edge_scale_vis")
-                    edge_min_width = st.slider("Largura mínima da aresta", 0.2, 2.0, 0.5, 0.1, key="edge_min_vis")
-                    edge_max_width = st.slider("Largura máxima da aresta", 2.0, 8.0, 6.0, 0.5, key="edge_max_vis")
+                    edge_scale = st.slider(
+                        "Multiplicador de espessura das arestas", 
+                        0.5, 2.5, 1.0, 0.1,
+                        key="edge_scale_vis",
+                        help="1.0 = espessura automática; >1 aumenta, <1 diminui."
+                    )
                 
                 col_c, col_d = st.columns(2)
                 with col_c:
@@ -350,31 +357,29 @@ def render_wizard():
                     G,
                     metric=node_metric,
                     scale_factor=node_scale,
-                    min_size=node_min_size,
-                    max_size=node_max_size
                 )
                 
                 # Chama display_graph com todos os parâmetros (incluindo edge_scale)
                 display_graph(
-                    G_prepared,
-                    title,
-                    "current_graph",
-                    view_mode,
-                    top_n=top_n,
-                    filter_criterion=filter_criterion,
-                    node_metric=node_metric,
-                    node_scale=node_scale,
-                    node_min_size=node_min_size,
-                    node_max_size=node_max_size,
-                    edge_scale=edge_scale,
-                    edge_min_width=edge_min_width,
-                    edge_max_width=edge_max_width,
+                    G_prepared,                      
+                    title,                           
+                    "current_graph",                 
+                    view_mode,                       
+                    top_n=top_n,                     
+                    filter_criterion=filter_criterion,  
+                    node_metric=node_metric,         
+                    node_scale=node_scale,           
+                    node_min_size=None,              
+                    node_max_size=None,              
+                    edge_scale=edge_scale,        
+                    edge_min_width=None,             
+                    edge_max_width=None,             
                     font_size=font_size,
                     fig_width=fig_width,
                     fig_height=fig_height,
                     layout_type=layout_type,
-                    layout_k=layout_k if layout_type == 'spring' else 0.3,
-                    layout_iterations=layout_iterations if layout_type == 'spring' else 100,
+                    layout_k=layout_k,
+                    layout_iterations=layout_iterations,
                     show_labels=show_labels,
                     label_trim=label_trim
                 )
@@ -527,6 +532,41 @@ def render_wizard():
             if top_keywords:
                 st.markdown("**Termos mais frequentes no corpus:** " + ", ".join(top_keywords))
                 st.markdown("**Sugestão:** Considere adicionar ou remover termos na query para refinar o escopo.")
+
+            # ============================================================
+            # EXPORTAR CORPUS PROCESSADO
+            # ============================================================
+            st.subheader("📤 Exportar Corpus Processado")
+            st.markdown("Baixe o corpus atual nos formatos CSV ou Excel (XLSX).")
+            col_exp1, col_exp2 = st.columns(2)
+            with col_exp1:
+                if st.button("📥 Baixar como CSV", key="export_csv"):
+                    df_export = df.copy()
+                    if 'tokens' in df_export.columns:
+                        df_export = df_export.drop(columns=['tokens'])
+                    csv = df_export.to_csv(index=False).encode('utf-8')
+                    st.download_button(
+                        label="Clique para baixar CSV",
+                        data=csv,
+                        file_name="corpus_processado.csv",
+                        mime="text/csv"
+                    )
+            with col_exp2:
+                if st.button("📥 Baixar como Excel", key="export_excel"):
+                    df_export = df.copy()
+                    if 'tokens' in df_export.columns:
+                        df_export = df_export.drop(columns=['tokens'])
+                    from io import BytesIO
+                    output = BytesIO()
+                    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                        df_export.to_excel(writer, index=False, sheet_name='Corpus')
+                    excel_data = output.getvalue()
+                    st.download_button(
+                        label="Clique para baixar Excel",
+                        data=excel_data,
+                        file_name="corpus_processado.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    )
             
             # Navegação
             col_prev, col_next = st.columns(2)
