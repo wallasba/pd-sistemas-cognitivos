@@ -19,6 +19,7 @@ from src.recommender import (
 from src.rag_pipeline import RAGPipeline
 import matplotlib.pyplot as plt
 from pyvis.network import Network
+import networkx as nx
 import streamlit.components.v1 as components
 import nltk
 
@@ -33,7 +34,9 @@ except LookupError:
     nltk.download('stopwords', quiet=True)
     nltk.download('wordnet', quiet=True)
 
-# (restante do código)
+for f in ["graph_coauth.html", "graph_inst.html", "graph_terms.html"]:
+    if os.path.exists(f):
+        os.remove(f)
 
 # ============================================================
 # Configuração da página
@@ -435,63 +438,123 @@ elif st.session_state.step == 4:
         ax.axis('off')
         st.pyplot(fig_wc)
         
-        # Grafos interativos (em colunas)
+        # ============================================================
+        # GRAFOS COM CONTROLE DE FÍSICA E CACHE
+        # ============================================================
         st.subheader("🕸️ Grafos de Conhecimento")
+        
+        # Opção para escolher o modo de visualização
+        view_mode = st.radio(
+            "Escolha o modo de visualização:",
+            ["Interativo (com zoom e arraste)", "Estático (imagem fixa)"],
+            index=0,
+            horizontal=True,
+            help="O modo interativo permite explorar, mas pode ter animação. O modo estático é uma imagem fixa."
+        )
+        
+        st.markdown("**Instruções:** Clique nos botões para gerar grafos.")
+        
+        # Função para filtrar os N nós mais importantes (por grau)
+        def filter_top_nodes(G, top_n=30):
+            if G.number_of_nodes() <= top_n:
+                return G
+            deg = dict(G.degree())
+            sorted_nodes = sorted(deg.items(), key=lambda x: x[1], reverse=True)
+            top_nodes = [node for node, _ in sorted_nodes[:top_n]]
+            return G.subgraph(top_nodes).copy()
+        
+        # Função para exibir grafo com cache e controle de física
+        def display_graph(G, title, key_suffix, view_mode, top_n=30):
+            if G is None or G.number_of_nodes() == 0:
+                st.info(f"Sem dados para gerar o grafo '{title}'.")
+                return
+            
+            G_filtered = filter_top_nodes(G, top_n)
+            if G_filtered.number_of_nodes() < 2:
+                st.info(f"Grafo muito pequeno para visualização.")
+                return
+            
+            st.caption(f"Exibindo {G_filtered.number_of_nodes()} nós (dos {G.number_of_nodes()} totais).")
+            
+            cache_key = f"graph_{key_suffix}"
+            
+            if view_mode == "Interativo (com zoom e arraste)":
+                try:
+                    if cache_key not in st.session_state or st.session_state.get(f"{cache_key}_force", False):
+                        net = Network(height="600px", width="100%", notebook=False, bgcolor="#ffffff")
+                        net.from_nx(G_filtered)
+                        net.set_options("""
+                        var options = {
+                        "physics": {
+                            "enabled": false
+                        }
+                        }
+                        """)
+                        filename = f"graph_{key_suffix}.html"
+                        net.write_html(filename)
+                        with open(filename, "r", encoding="utf-8") as f:
+                            html_content = f.read()
+                        if len(html_content) > 1000:
+                            st.session_state[cache_key] = html_content
+                            st.session_state[f"{cache_key}_force"] = False
+                        else:
+                            raise Exception("HTML incompleto.")
+                    if cache_key in st.session_state:
+                        st.components.v1.html(st.session_state[cache_key], height=650)
+                        st.caption("Grafo interativo (arraste para mover, role para zoom). A física está desativada.")
+                        if st.button("🔄 Recarregar grafo", key=f"reload_{key_suffix}"):
+                            st.session_state[f"{cache_key}_force"] = True
+                            st.rerun()
+                    else:
+                        st.warning("Grafo não disponível. Tente novamente.")
+                except Exception as e:
+                    st.warning(f"Falha ao gerar grafo interativo: {e}. Exibindo versão estática.")
+                    # Fallback para estático chamando a própria função com view_mode alterado
+                    display_graph(G, title, key_suffix, "Estático (imagem fixa)", top_n)
+            else:
+                # Modo estático com Matplotlib
+                try:
+                    fig, ax = plt.subplots(figsize=(12, 8))
+                    pos = nx.spring_layout(G_filtered, seed=42, k=0.3, iterations=50)
+                    nx.draw_networkx_nodes(G_filtered, pos, ax=ax, node_size=80, node_color='lightblue', alpha=0.7)
+                    nx.draw_networkx_edges(G_filtered, pos, ax=ax, alpha=0.2, width=0.5)
+                    nx.draw_networkx_labels(G_filtered, pos, ax=ax, font_size=7)
+                    ax.set_title(f"{title} (top {G_filtered.number_of_nodes()} nós)")
+                    ax.axis('off')
+                    st.pyplot(fig)
+                    plt.close(fig)
+                    st.caption("Versão estática (imagem fixa).")
+                except Exception as e2:
+                    st.error(f"Erro ao gerar visualização estática: {e2}")
+        
+        # Botões com spinner e feedback
         col_g1, col_g2, col_g3 = st.columns(3)
         with col_g1:
-            if st.button("📌 Coautoria"):
-                G = build_coauthorship_graph(df)
-                if G.number_of_nodes() > 0:
-                    net = Network(height="500px", width="100%")
-                    net.from_nx(G)
-                    try:
-                        net.write_html("graph_coauth.html", notebook=True)
-                        with open("graph_coauth.html", "r", encoding="utf-8") as f:
-                            html = f.read()
-                        components.html(html, height=600)
-                    except Exception as e:
-                        st.error(f"Erro ao gerar o grafo: {e}")
-                else:
-                    st.info("Grafo pequeno ou sem coautoria.")
+            if st.button("📌 Coautoria (top 30)", key="btn_coauth"):
+                with st.spinner("Construindo grafo de coautoria..."):
+                    G = build_coauthorship_graph(df, min_coauthors=2)
+                    display_graph(G, "Rede de Coautoria", "coauth", view_mode, top_n=30)
         with col_g2:
-            if st.button("🏛️ Instituições"):
-                G = build_institution_collaboration_graph(df)
-                if G.number_of_nodes() > 0:
-                    net = Network(height="500px", width="100%")
-                    net.from_nx(G)
-                    try:
-                        net.write_html("graph_inst.html", notebook=True)
-                        with open("graph_inst.html", "r", encoding="utf-8") as f:
-                            html = f.read()
-                        components.html(html, height=600)
-                    except Exception as e:
-                        st.error(f"Erro ao gerar o grafo: {e}")
-                else:
-                    st.info("Poucas instituições ou sem colaboração.")
+            if st.button("🏛️ Instituições (top 30)", key="btn_inst"):
+                with st.spinner("Construindo grafo de instituições..."):
+                    G = build_institution_collaboration_graph(df)
+                    display_graph(G, "Colaboração entre Instituições", "inst", view_mode, top_n=30)
         with col_g3:
-            if st.button("🔗 Termos × Instituições"):
-                G = build_term_institution_graph(df, top_terms=20)
-                if G.number_of_nodes() > 0:
-                    net = Network(height="500px", width="100%")
-                    net.from_nx(G)
-                    try:
-                        net.write_html("graph_terms.html", notebook=True)
-                        with open("graph_terms.html", "r", encoding="utf-8") as f:
-                            html = f.read()
-                        components.html(html, height=600)
-                    except Exception as e:
-                        st.error(f"Erro ao gerar o grafo: {e}")
-                else:
-                    st.info("Relações insuficientes.")
+            if st.button("🔗 Termos × Instituições (top 20)", key="btn_terms"):
+                with st.spinner("Construindo grafo termos-instituições..."):
+                    G = build_term_institution_graph(df, top_terms=20)
+                    display_graph(G, "Termos Frequentes vs Instituições", "terms", view_mode, top_n=25)
         
-        # Refinamento: sugestões de novos termos com base no corpus
+        # ============================================================
+        # Recomendações e refinamento
+        # ============================================================
         st.subheader("💡 Recomendações para Refinamento")
         top_keywords = extract_keywords(df, top_n=10)
         if top_keywords:
             st.markdown("**Termos mais frequentes no corpus coletado:** " + ", ".join(top_keywords))
             st.markdown("**Sugestão:** Considere adicionar ou remover termos na sua query para refinar o escopo.")
         
-        # Botão para voltar e refinar a busca
+        # Botões de navegação
         col_prev, col_next = st.columns(2)
         with col_prev:
             if st.button("← Voltar para Estratégia de Busca"):
