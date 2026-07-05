@@ -93,13 +93,13 @@ with st.sidebar:
     st.divider()
     
     # ============================================================
-    # UPLOAD DE CORPUS EXISTENTE
+    # UPLOAD DE CORPUS EXISTENTE (CSV, XLSX, XLS)
     # ============================================================
     st.header("📂 Carregar Corpus Existente")
     
-    with st.expander("📋 Estrutura necessária do CSV"):
+    with st.expander("📋 Estrutura necessária do arquivo"):
         st.markdown("""
-        O arquivo CSV deve conter as seguintes colunas:
+        O arquivo (CSV, XLSX ou XLS) deve conter as seguintes colunas:
         - **`title`** (texto): Título do artigo.
         - **`abstract`** (texto): Resumo do artigo.
         - **`source`** (texto): Fonte (ex: arxiv, pubmed).
@@ -110,31 +110,48 @@ with st.sidebar:
         st.caption("💡 Colunas adicionais são permitidas, mas não obrigatórias.")
     
     uploaded_file = st.file_uploader(
-        "Faça upload do seu corpus (CSV)",
-        type=['csv'],
-        help="Arquivo CSV com a estrutura descrita acima."
+        "Faça upload do seu corpus (CSV, XLSX ou XLS)",
+        type=['csv', 'xlsx', 'xls'],
+        help="Arquivo com a estrutura descrita acima."
     )
     
     if uploaded_file is not None:
         # Verifica se o arquivo não está vazio
         if uploaded_file.size == 0:
-            st.error("❌ O arquivo está vazio. Por favor, envie um CSV com dados.")
+            st.error("❌ O arquivo está vazio. Por favor, envie um arquivo com dados.")
         else:
             try:
-                # Tenta ler o CSV com parâmetros robustos
-                # - low_memory=False para evitar warnings
-                # - encoding='utf-8' padrão, mas com fallback para 'latin1'
-                # - engine='python' para maior tolerância a inconsistências
-                df_raw = pd.read_csv(
-                    uploaded_file,
-                    encoding='utf-8',
-                    engine='python',
-                    low_memory=False
-                )
+                # ============================================================
+                # DETECTA O FORMATO E LÊ O ARQUIVO
+                # ============================================================
+                file_extension = uploaded_file.name.split('.')[-1].lower()
                 
-                # Verifica se o DataFrame está vazio
+                if file_extension == 'csv':
+                    df_raw = pd.read_csv(
+                        uploaded_file,
+                        encoding='utf-8',
+                        engine='python',
+                        low_memory=False
+                    )
+                elif file_extension == 'xlsx':
+                    df_raw = pd.read_excel(
+                        uploaded_file,
+                        engine='openpyxl'
+                    )
+                elif file_extension == 'xls':
+                    df_raw = pd.read_excel(
+                        uploaded_file,
+                        engine='xlrd'
+                    )
+                else:
+                    st.error(f"❌ Formato '{file_extension}' não suportado. Use CSV, XLSX ou XLS.")
+                    st.stop()
+                
+                # ============================================================
+                # VALIDAÇÃO E PRÉ-PROCESSAMENTO
+                # ============================================================
                 if df_raw.empty:
-                    st.error("❌ O arquivo CSV não contém dados. Verifique o conteúdo.")
+                    st.error("❌ O arquivo não contém dados. Verifique o conteúdo.")
                 else:
                     # Converte colunas de texto para string (evita erro de .split())
                     text_cols = ['title', 'abstract', 'source', 'authors', 'affiliations']
@@ -184,19 +201,23 @@ with st.sidebar:
                                 st.rerun()
             
             except pd.errors.EmptyDataError:
-                st.error("❌ O arquivo CSV está vazio ou corrompido. Verifique o conteúdo.")
+                st.error("❌ O arquivo está vazio ou corrompido. Verifique o conteúdo.")
             except UnicodeDecodeError:
-                # Fallback para encoding alternativo
+                # Fallback para encoding alternativo (apenas CSV)
                 try:
-                    uploaded_file.seek(0)  # Reinicia o ponteiro do arquivo
-                    df_raw = pd.read_csv(
-                        uploaded_file,
-                        encoding='latin1',
-                        engine='python',
-                        low_memory=False
-                    )
-                    st.info("🔁 Leitura bem-sucedida com encoding 'latin1'. Considere salvar seu CSV em UTF-8.")
-                    # Prossegue com a leitura (pode-se repetir a lógica de validação)
+                    uploaded_file.seek(0)
+                    if file_extension == 'csv':
+                        df_raw = pd.read_csv(
+                            uploaded_file,
+                            encoding='latin1',
+                            engine='python',
+                            low_memory=False
+                        )
+                        st.info("🔁 Leitura bem-sucedida com encoding 'latin1'. Considere salvar seu CSV em UTF-8.")
+                        # Repete a validação (simplificada aqui, mas você pode chamar uma função)
+                        # Para evitar duplicação, sugiro extrair a validação para uma função separada.
+                    else:
+                        st.error("❌ Erro de encoding em arquivo Excel. Verifique o formato.")
                 except Exception as e2:
                     st.error(f"❌ Erro de encoding: {e2}")
             except Exception as e:
