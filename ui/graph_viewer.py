@@ -4,6 +4,7 @@ import networkx as nx
 import pandas as pd
 import numpy as np
 from pyvis.network import Network
+from src.graph_builder import filter_top_nodes_by_criterion
 import streamlit.components.v1 as components
 import os
 
@@ -86,6 +87,8 @@ def display_graph(
     key_suffix, 
     view_mode, 
     top_n=30,
+    filter_criterion = 'degree',
+
     # Parâmetros visuais ajustáveis
     node_metric='degree',
     node_scale=1.0,
@@ -110,7 +113,7 @@ def display_graph(
         st.info(f"ℹ️ Sem dados para gerar o grafo '{title}'.")
         return
     
-    G_filtered = filter_top_nodes(G, top_n)
+    G_filtered = filter_top_nodes_by_criterion(G, top_n, filter_criterion)
     if G_filtered is None or G_filtered.number_of_nodes() < 2:
         st.info(f"ℹ️ Grafo muito pequeno para visualização (menos de 2 nós).")
         return

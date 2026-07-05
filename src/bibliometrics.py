@@ -5,6 +5,7 @@ from collections import Counter
 from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from src.preprocessor import clean_text
+import streamlit as st
 import re
 
 def get_top_authors(df: pd.DataFrame, top_n: int = 10) -> dict:
@@ -170,3 +171,7 @@ def get_bibliometric_insights(df: pd.DataFrame, query: str = "") -> dict:
     insights['temporal'] = get_temporal_trends(df)
     insights['collaboration'] = get_collaboration_metrics(df)
     return insights
+
+if st.button("📌 Mostrar apenas os top 10 autores no grafo"):
+    top_authors = [a for a, _ in st.session_state.biblio_insights['authors']['top_authors']]
+    # Recria o grafo com apenas esses autores (ou destaca no grafo atual)

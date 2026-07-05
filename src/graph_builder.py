@@ -5,9 +5,17 @@ from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
 
+# src/graph_builder.py
+
 def build_coauthorship_graph(df: pd.DataFrame, min_coauthors: int = 2) -> nx.Graph:
-    """Já existente – mantido."""
+    """
+    Constrói grafo de coautoria.
+    Nós = autores. Arestas = coautoria (peso = número de artigos em colaboração).
+    Adiciona atributo 'frequency' a cada nó = número total de artigos do autor.
+    """
     G = nx.Graph()
+    all_authors = []  # Lista para acumular todos os autores (para frequência)
+    
     for _, row in df.iterrows():
         authors = row.get('authors', '')
         if not authors:
@@ -15,6 +23,9 @@ def build_coauthorship_graph(df: pd.DataFrame, min_coauthors: int = 2) -> nx.Gra
         author_list = [a.strip() for a in authors.split(',') if a.strip()]
         if len(author_list) < min_coauthors:
             continue
+        # Acumula autores para frequência
+        all_authors.extend(author_list)
+        # Adiciona arestas de coautoria
         for i in range(len(author_list)):
             for j in range(i+1, len(author_list)):
                 u, v = author_list[i], author_list[j]
@@ -22,7 +33,17 @@ def build_coauthorship_graph(df: pd.DataFrame, min_coauthors: int = 2) -> nx.Gra
                     G[u][v]['weight'] += 1
                 else:
                     G.add_edge(u, v, weight=1)
+    
+    # Calcula frequência de cada autor
+    author_freq = Counter(all_authors)
+    
+    # Adiciona atributo 'frequency' a cada nó
+    for node in G.nodes:
+        G.nodes[node]['frequency'] = author_freq.get(node, 0)
+    
+    # Remove nós isolados (sem arestas)
     G.remove_nodes_from([n for n, d in G.degree() if d == 0])
+    
     return G
 
 def build_institution_collaboration_graph(df: pd.DataFrame) -> nx.Graph:
@@ -65,6 +86,34 @@ def build_term_institution_graph(df: pd.DataFrame, top_terms: int = 30) -> nx.Gr
                     G.add_edge(inst, term, weight=1)
     G.remove_nodes_from([n for n, d in G.degree() if d == 0])
     return G
+
+def filter_top_nodes_by_criterion(G, top_n=30, criterion='degree'):
+    """
+    Filtra os N nós mais importantes de acordo com o critério.
+    - degree: maior grau
+    - frequency: maior frequência (atributo 'frequency' do nó)
+    - betweenness: maior centralidade
+    """
+    if G is None or G.number_of_nodes() == 0:
+        return G
+    if G.number_of_nodes() <= top_n:
+        return G
+    
+    if criterion == 'degree':
+        scores = dict(G.degree())
+    elif criterion == 'betweenness':
+        scores = nx.betweenness_centrality(G)
+    elif criterion == 'frequency':
+        scores = {}
+        for node in G.nodes:
+            freq = G.nodes[node].get('frequency', 0)
+            scores[node] = freq if freq > 0 else G.degree(node)  # fallback
+    else:
+        scores = dict(G.degree())
+    
+    sorted_nodes = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+    top_nodes = [node for node, _ in sorted_nodes[:top_n]]
+    return G.subgraph(top_nodes).copy()
 
 # ============================================================
 # NOVOS GRAFOS
