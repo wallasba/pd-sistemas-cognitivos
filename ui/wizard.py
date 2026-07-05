@@ -400,6 +400,117 @@ def render_wizard():
         else:
             st.warning("Nenhum corpus coletado. Volte e realize a coleta.")
     
+    # ui/wizard.py – dentro da Etapa 4, após a seção de grafos
+
+    # ============================================================
+    # ANÁLISE BIBLIOMÉTRICA AUTOMÁTICA
+    # ============================================================
+    st.subheader("📊 Análise Bibliométrica Automática")
+    st.markdown("""
+    O sistema realiza automaticamente análises essenciais para pesquisadores seniores, utilizando **proxies** (medidas indiretas) 
+    baseadas nos dados disponíveis. Abaixo estão os principais insights.
+    """)
+
+    # Explicação sobre proxy
+    with st.expander("ℹ️ O que é um proxy em bibliometria?", expanded=False):
+        st.markdown("""
+        Em bibliometria, um **proxy** é uma medida indireta utilizada para representar ou estimar uma característica de interesse 
+        quando não é possível medi-la diretamente. Exemplos comuns:
+        - **Número de citações** → proxy de **impacto científico**.
+        - **Frequência de coocorrência de termos** → proxy de **relevância temática**.
+        - **Centralidade em redes** → proxy de **influência** de autores ou instituições.
+        
+        Nesta aplicação, como não dispomos de dados de citações, utilizamos **proxies** baseados nos metadados disponíveis:
+        - **Frequência de autores** → proxy de **produtividade**.
+        - **Frequência de termos** → proxy de **temas principais**.
+        - **Coautoria e afiliações** → proxy de **redes de colaboração**.
+        """)
+
+    # Botão para executar análises
+    if st.button("🔍 Executar Análises Bibliométricas", key="run_biblio"):
+        with st.spinner("Processando dados..."):
+            query = st.session_state.query if st.session_state.query else ""
+            insights = get_bibliometric_insights(df, query)
+            st.session_state.biblio_insights = insights
+            st.success("Análises concluídas!")
+
+    # Exibir insights se disponíveis
+    if st.session_state.get('biblio_insights') is not None:
+        insights = st.session_state.biblio_insights
+        biblio_col1, biblio_col2 = st.columns(2)
+        
+        # Coluna 1: Autores, Instituições, Colaboração
+        with biblio_col1:
+            st.markdown("**👥 Autores mais frequentes (proxy de produtividade)**")
+            if 'error' in insights.get('authors', {}):
+                st.info(insights['authors']['error'])
+            else:
+                authors_data = insights['authors']
+                for i, (author, count) in enumerate(authors_data['top_authors'], 1):
+                    st.write(f"{i}. **{author}** – {count} menções")
+                st.caption(f"Total de autores únicos: {authors_data['total_unique_authors']}")
+            
+            st.markdown("---")
+            st.markdown("**🏛️ Instituições mais frequentes (proxy de produção institucional)**")
+            if 'error' in insights.get('institutions', {}):
+                st.info(insights['institutions']['error'])
+            else:
+                inst_data = insights['institutions']
+                for i, (inst, count) in enumerate(inst_data['top_institutions'], 1):
+                    st.write(f"{i}. **{inst}** – {count} menções")
+                st.caption(f"Total de instituições únicas: {inst_data['total_unique_inst']}")
+        
+        # Coluna 2: Termos, Similaridade, Tendências
+        with biblio_col2:
+            st.markdown("**📝 Termos mais frequentes (proxy de temas principais)**")
+            if 'error' in insights.get('terms', {}):
+                st.info(insights['terms']['error'])
+            else:
+                terms_data = insights['terms']
+                for term, count in terms_data['top_terms']:
+                    st.write(f"- **{term}** ({count})")
+                st.caption(f"Total de termos únicos: {terms_data['total_terms']}")
+            
+            st.markdown("---")
+            st.markdown("**📈 Evolução temporal dos termos (tendências emergentes)**")
+            temporal = insights.get('temporal', {})
+            if 'error' in temporal:
+                st.info(temporal['error'])
+            else:
+                years = temporal.get('years', [])
+                if years:
+                    st.write(f"Período analisado: {min(years)} – {max(years)}")
+                    growing = temporal.get('top_growing_terms', [])
+                    if growing:
+                        st.write("**Termos com maior crescimento:**")
+                        for term, growth in growing[:5]:
+                            st.write(f"- **{term}** (crescimento: {growth:.2f})")
+                    else:
+                        st.info("Nenhum termo com crescimento significativo.")
+        
+        # Linha extra para similaridade
+        st.markdown("---")
+        st.markdown("**🔍 Artigos mais similares ao tema pesquisado**")
+        sim = insights.get('similar_articles', {})
+        if 'error' in sim:
+            st.info(sim['error'])
+        elif sim.get('top_articles'):
+            for i, article in enumerate(sim['top_articles'], 1):
+                st.write(f"{i}. **{article['title']}** (similaridade: {article['score']:.3f})")
+                st.caption(f"Resumo: {article['abstract_preview']}")
+        else:
+            st.info("Nenhum artigo similar encontrado.")
+        
+        # Colaboração e estatísticas
+        st.markdown("---")
+        st.markdown("**🤝 Métricas de Colaboração**")
+        collab = insights.get('collaboration', {})
+        if collab:
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Média de autores/artigo", collab.get('avg_authors_per_article', 0))
+            col2.metric("Artigos com múltiplas afiliações", collab.get('multi_institution_articles', 0))
+            col3.metric("Taxa de colaboração", f"{collab.get('collaboration_rate', 0)}%")
+
     # ============================================================
     # ETAPA 5: Resumo
     # ============================================================
