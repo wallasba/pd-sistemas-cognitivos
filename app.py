@@ -444,10 +444,13 @@ elif st.session_state.step == 4:
                 if G.number_of_nodes() > 0:
                     net = Network(height="500px", width="100%")
                     net.from_nx(G)
-                    net.show("graph_coauth.html")
-                    with open("graph_coauth.html", "r", encoding="utf-8") as f:
-                        html = f.read()
-                    components.html(html, height=600)
+                    try:
+                        net.write_html("graph_coauth.html", notebook=True)
+                        with open("graph_coauth.html", "r", encoding="utf-8") as f:
+                            html = f.read()
+                        components.html(html, height=600)
+                    except Exception as e:
+                        st.error(f"Erro ao gerar o grafo: {e}")
                 else:
                     st.info("Grafo pequeno ou sem coautoria.")
         with col_g2:
@@ -456,10 +459,13 @@ elif st.session_state.step == 4:
                 if G.number_of_nodes() > 0:
                     net = Network(height="500px", width="100%")
                     net.from_nx(G)
-                    net.show("graph_inst.html")
-                    with open("graph_inst.html", "r", encoding="utf-8") as f:
-                        html = f.read()
-                    components.html(html, height=600)
+                    try:
+                        net.write_html("graph_inst.html", notebook=True)
+                        with open("graph_inst.html", "r", encoding="utf-8") as f:
+                            html = f.read()
+                        components.html(html, height=600)
+                    except Exception as e:
+                        st.error(f"Erro ao gerar o grafo: {e}")
                 else:
                     st.info("Poucas instituições ou sem colaboração.")
         with col_g3:
@@ -468,10 +474,13 @@ elif st.session_state.step == 4:
                 if G.number_of_nodes() > 0:
                     net = Network(height="500px", width="100%")
                     net.from_nx(G)
-                    net.show("graph_terms.html")
-                    with open("graph_terms.html", "r", encoding="utf-8") as f:
-                        html = f.read()
-                    components.html(html, height=600)
+                    try:
+                        net.write_html("graph_terms.html", notebook=True)
+                        with open("graph_terms.html", "r", encoding="utf-8") as f:
+                            html = f.read()
+                        components.html(html, height=600)
+                    except Exception as e:
+                        st.error(f"Erro ao gerar o grafo: {e}")
                 else:
                     st.info("Relações insuficientes.")
         
