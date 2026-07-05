@@ -8,8 +8,13 @@ from src.analyzer import get_stats, generate_wordcloud, plot_distributions
 from src.graph_builder import (
     build_coauthorship_graph,
     build_institution_collaboration_graph,
-    build_term_institution_graph
+    build_term_institution_graph,
+    build_term_cooccurrence_graph,
+    build_author_citation_proxy_graph,
+    build_article_similarity_graph,
+    prepare_node_attributes
 )
+
 from src.recommender import (
     suggest_objectives,
     suggest_hypotheses,
@@ -439,20 +444,81 @@ elif st.session_state.step == 4:
         st.pyplot(fig_wc)
         
         # ============================================================
-        # GRAFOS COM CONTROLE DE FÍSICA E CACHE
+        # GRAFOS COM MÚLTIPLAS PERSPECTIVAS E ATRIBUTOS VISUAIS
         # ============================================================
-        st.subheader("🕸️ Grafos de Conhecimento")
-        
-        # Opção para escolher o modo de visualização
-        view_mode = st.radio(
-            "Escolha o modo de visualização:",
-            ["Interativo (com zoom e arraste)", "Estático (imagem fixa)"],
-            index=0,
-            horizontal=True,
-            help="O modo interativo permite explorar, mas pode ter animação. O modo estático é uma imagem fixa."
+        st.subheader("🕸️ Análise de Redes Científicas")
+        st.markdown("""
+        **Escolha o tipo de grafo e as métricas para visualização:**
+        - **Tamanho do nó** pode representar grau, betweenness ou número de publicações.
+        - **Cor** pode representar comunidades (grupos de pesquisa) ou ser fixa.
+        """)
+
+        # Seleção do tipo de grafo
+        graph_type = st.selectbox(
+            "Tipo de grafo:",
+            [
+                "Coautoria",
+                "Colaboração entre Instituições",
+                "Termos × Instituições",
+                "Co-ocorrência de Termos",
+                "Cocitação (proxy - autores)",
+                "Acoplamento (proxy - similaridade de artigos)"
+            ]
         )
-        
-        st.markdown("**Instruções:** Clique nos botões para gerar grafos.")
+
+        # Parâmetros específicos para cada grafo
+        with st.expander("⚙️ Parâmetros do grafo"):
+            top_n = st.slider("Número máximo de nós a exibir", 10, 100, 30, step=5)
+            min_weight = st.slider("Peso mínimo da aresta", 1, 10, 2, step=1)
+            if graph_type == "Coautoria":
+                min_coauthors = st.slider("Mínimo de coautores por artigo", 2, 5, 2)
+            elif graph_type == "Co-ocorrência de Termos":
+                top_terms = st.slider("Número de termos", 20, 100, 50, step=5)
+
+        # Métricas para atributos visuais
+        col_vis1, col_vis2 = st.columns(2)
+        with col_vis1:
+            size_metric = st.selectbox(
+                "Tamanho do nó baseado em:",
+                ["grau (conexões)", "betweenness (centralidade)", "fixo"]
+            )
+        with col_vis2:
+            color_mode = st.selectbox(
+                "Cor do nó:",
+                ["comunidades (Louvain)", "fixa (azul)"]
+            )
+
+        # Botão para gerar
+        if st.button("📊 Gerar Grafo", type="primary"):
+            with st.spinner(f"Construindo grafo de {graph_type}..."):
+                G = None
+                if graph_type == "Coautoria":
+                    G = build_coauthorship_graph(df, min_coauthors=min_coauthors)
+                elif graph_type == "Colaboração entre Instituições":
+                    G = build_institution_collaboration_graph(df)
+                elif graph_type == "Termos × Instituições":
+                    G = build_term_institution_graph(df, top_terms=top_n)
+                elif graph_type == "Co-ocorrência de Termos":
+                    G = build_term_cooccurrence_graph(df, top_terms=top_terms, min_cooccurrence=min_weight)
+                elif graph_type == "Cocitação (proxy - autores)":
+                    G = build_author_citation_proxy_graph(df, top_authors=top_n)
+                elif graph_type == "Acoplamento (proxy - similaridade de artigos)":
+                    G = build_article_similarity_graph(df, top_n=top_n, threshold=min_weight/10)
+                
+                if G is None or G.number_of_nodes() == 0:
+                    st.warning("Grafo vazio. Tente ajustar os parâmetros.")
+                else:
+                    # Aplica atributos visuais
+                    metric_map = {
+                        "grau (conexões)": "degree",
+                        "betweenness (centralidade)": "betweenness",
+                        "fixo": "fixed"
+                    }
+                    community_detection = (color_mode == "comunidades (Louvain)")
+                    G = prepare_node_attributes(G, metric=metric_map[size_metric], community_detection=community_detection)
+                    
+                    # Exibe o grafo com a função display_graph (que já temos)
+                    display_graph(G, graph_type, "custom", view_mode, top_n=top_n)
         
         # Função para filtrar os N nós mais importantes (por grau)
         def filter_top_nodes(G, top_n=30):
@@ -464,68 +530,249 @@ elif st.session_state.step == 4:
             return G.subgraph(top_nodes).copy()
         
         # Função para exibir grafo com cache e controle de física
-        def display_graph(G, title, key_suffix, view_mode, top_n=30):
+        def filter_top_nodes(G, top_n=30):
+            """Filtra os N nós mais importantes (por grau)."""
             if G is None or G.number_of_nodes() == 0:
-                st.info(f"Sem dados para gerar o grafo '{title}'.")
+                return G
+            if G.number_of_nodes() <= top_n:
+                return G
+            deg = dict(G.degree())
+            sorted_nodes = sorted(deg.items(), key=lambda x: x[1], reverse=True)
+            top_nodes = [node for node, _ in sorted_nodes[:top_n]]
+            return G.subgraph(top_nodes).copy()
+
+        def prepare_node_attributes(G, metric='degree', community_detection=True):
+            """
+            Adiciona atributos 'size' e 'color' aos nós do grafo.
+            - size: baseado em grau, betweenness ou fixo (30)
+            - color: baseado em comunidades (Louvain) ou fixo (#4A90D9)
+            """
+            if G is None or G.number_of_nodes() == 0:
+                return G
+            
+            G_copy = G.copy()
+            
+            # 1. Define tamanho dos nós
+            if metric == 'degree':
+                deg = dict(G_copy.degree())
+                max_deg = max(deg.values()) if deg else 1
+                for node in G_copy.nodes:
+                    # Tamanho entre 10 e 60, proporcional ao grau
+                    size = 10 + (deg.get(node, 0) / max_deg) * 50
+                    G_copy.nodes[node]['size'] = size
+            elif metric == 'betweenness':
+                try:
+                    betweenness = nx.betweenness_centrality(G_copy)
+                    max_val = max(betweenness.values()) if betweenness else 1
+                    for node in G_copy.nodes:
+                        size = 10 + (betweenness.get(node, 0) / max_val) * 50
+                        G_copy.nodes[node]['size'] = size
+                except:
+                    # Fallback para grau se betweenness falhar
+                    deg = dict(G_copy.degree())
+                    max_deg = max(deg.values()) if deg else 1
+                    for node in G_copy.nodes:
+                        size = 10 + (deg.get(node, 0) / max_deg) * 50
+                        G_copy.nodes[node]['size'] = size
+            else:  # 'fixed'
+                for node in G_copy.nodes:
+                    G_copy.nodes[node]['size'] = 30
+            
+            # 2. Define cor dos nós
+            if community_detection and G_copy.number_of_nodes() > 2:
+                try:
+                    from networkx.algorithms.community import louvain_communities
+                    communities = louvain_communities(G_copy, seed=42)
+                    color_map = {}
+                    colors = [
+                        '#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A', 
+                        '#98D8C8', '#DDA0DD', '#F0E68C', '#FFD700',
+                        '#87CEEB', '#FF69B4', '#32CD32', '#FF4500'
+                    ]
+                    for i, comm in enumerate(communities):
+                        color = colors[i % len(colors)]
+                        for node in comm:
+                            color_map[node] = color
+                    for node in G_copy.nodes:
+                        G_copy.nodes[node]['color'] = color_map.get(node, '#D3D3D3')
+                except Exception as e:
+                    # Fallback: cor fixa se detecção de comunidades falhar
+                    for node in G_copy.nodes:
+                        G_copy.nodes[node]['color'] = '#4A90D9'
+            else:
+                for node in G_copy.nodes:
+                    G_copy.nodes[node]['color'] = '#4A90D9'
+            
+            return G_copy
+
+        def display_graph(G, title, key_suffix, view_mode, top_n=30):
+            """
+            Exibe grafo no Streamlit com suporte a:
+            - Modo interativo (PyVis) com física desativada
+            - Modo estático (Matplotlib) como fallback
+            - Cache do HTML no session_state
+            - Tamanho e cor dos nós (preparados por prepare_node_attributes)
+            """
+            if G is None or G.number_of_nodes() == 0:
+                st.info(f"ℹ️ Sem dados para gerar o grafo '{title}'.")
                 return
             
+            # Filtra para evitar sobrecarga
             G_filtered = filter_top_nodes(G, top_n)
-            if G_filtered.number_of_nodes() < 2:
-                st.info(f"Grafo muito pequeno para visualização.")
+            if G_filtered is None or G_filtered.number_of_nodes() < 2:
+                st.info(f"ℹ️ Grafo muito pequeno para visualização (menos de 2 nós).")
                 return
             
-            st.caption(f"Exibindo {G_filtered.number_of_nodes()} nós (dos {G.number_of_nodes()} totais).")
+            # Aplica atributos visuais (size e color) se ainda não tiverem sido aplicados
+            # (se já tiverem sido aplicados, mantém)
+            if G_filtered.nodes and 'size' not in G_filtered.nodes[next(iter(G_filtered.nodes))]:
+                # Se não tiver atributos, aplica padrão (grau + comunidades)
+                G_filtered = prepare_node_attributes(G_filtered, metric='degree', community_detection=True)
+            
+            total_nodes = G.number_of_nodes()
+            displayed_nodes = G_filtered.number_of_nodes()
+            st.caption(f"📊 Exibindo {displayed_nodes} nós (dos {total_nodes} totais).")
             
             cache_key = f"graph_{key_suffix}"
             
+            # ============================================================
+            # MODO INTERATIVO (PyVis)
+            # ============================================================
             if view_mode == "Interativo (com zoom e arraste)":
                 try:
+                    # Verifica se já está em cache e não precisa regenerar
                     if cache_key not in st.session_state or st.session_state.get(f"{cache_key}_force", False):
-                        net = Network(height="600px", width="100%", notebook=False, bgcolor="#ffffff")
+                        net = Network(
+                            height="600px", 
+                            width="100%", 
+                            notebook=False, 
+                            bgcolor="#ffffff",
+                            font_color="black"
+                        )
                         net.from_nx(G_filtered)
+                        
+                        # Aplica tamanho e cor dos nós manualmente (pyvis nem sempre transfere atributos)
+                        for node in G_filtered.nodes:
+                            if node in net.nodes:
+                                net.nodes[node]['size'] = G_filtered.nodes[node].get('size', 30)
+                                net.nodes[node]['color'] = G_filtered.nodes[node].get('color', '#4A90D9')
+                                # Adiciona título para tooltip
+                                if 'title' in G_filtered.nodes[node]:
+                                    net.nodes[node]['title'] = G_filtered.nodes[node]['title']
+                        
+                        # Desativa física para evitar movimentação automática
                         net.set_options("""
                         var options = {
                         "physics": {
                             "enabled": false
+                        },
+                        "interaction": {
+                            "hover": true,
+                            "tooltipDelay": 200
                         }
                         }
                         """)
+                        
+                        # Gera HTML
                         filename = f"graph_{key_suffix}.html"
                         net.write_html(filename)
                         with open(filename, "r", encoding="utf-8") as f:
                             html_content = f.read()
+                        
+                        # Limpa arquivo temporário
+                        try:
+                            os.remove(filename)
+                        except:
+                            pass
+                        
                         if len(html_content) > 1000:
                             st.session_state[cache_key] = html_content
                             st.session_state[f"{cache_key}_force"] = False
                         else:
-                            raise Exception("HTML incompleto.")
+                            raise Exception("HTML gerado é muito pequeno, provavelmente incompleto.")
+                    
+                    # Exibe o HTML do cache
                     if cache_key in st.session_state:
                         st.components.v1.html(st.session_state[cache_key], height=650)
-                        st.caption("Grafo interativo (arraste para mover, role para zoom). A física está desativada.")
-                        if st.button("🔄 Recarregar grafo", key=f"reload_{key_suffix}"):
-                            st.session_state[f"{cache_key}_force"] = True
-                            st.rerun()
+                        st.caption("🖱️ Grafo interativo: arraste para mover, role para zoom. Física desativada.")
+                        
+                        # Botão para forçar recarga
+                        col_reload, _ = st.columns([1, 5])
+                        with col_reload:
+                            if st.button("🔄 Recarregar grafo", key=f"reload_{key_suffix}", use_container_width=True):
+                                st.session_state[f"{cache_key}_force"] = True
+                                st.rerun()
                     else:
-                        st.warning("Grafo não disponível. Tente novamente.")
+                        st.warning("Grafo não disponível no cache. Tente novamente.")
+                        
                 except Exception as e:
-                    st.warning(f"Falha ao gerar grafo interativo: {e}. Exibindo versão estática.")
-                    # Fallback para estático chamando a própria função com view_mode alterado
+                    st.warning(f"⚠️ Falha ao gerar grafo interativo: {e}")
+                    st.info("🔄 Alternando para o modo estático (imagem fixa)...")
+                    # Fallback: chama a função novamente no modo estático
                     display_graph(G, title, key_suffix, "Estático (imagem fixa)", top_n)
+            
+            # ============================================================
+            # MODO ESTÁTICO (Matplotlib)
+            # ============================================================
             else:
-                # Modo estático com Matplotlib
                 try:
-                    fig, ax = plt.subplots(figsize=(12, 8))
-                    pos = nx.spring_layout(G_filtered, seed=42, k=0.3, iterations=50)
-                    nx.draw_networkx_nodes(G_filtered, pos, ax=ax, node_size=80, node_color='lightblue', alpha=0.7)
-                    nx.draw_networkx_edges(G_filtered, pos, ax=ax, alpha=0.2, width=0.5)
-                    nx.draw_networkx_labels(G_filtered, pos, ax=ax, font_size=7)
-                    ax.set_title(f"{title} (top {G_filtered.number_of_nodes()} nós)")
+                    # Extrai tamanhos e cores dos nós
+                    sizes = []
+                    colors = []
+                    labels = {}
+                    for node in G_filtered.nodes:
+                        sizes.append(G_filtered.nodes[node].get('size', 30))
+                        colors.append(G_filtered.nodes[node].get('color', '#4A90D9'))
+                        # Trunca labels longos
+                        label = str(node)
+                        if len(label) > 25:
+                            label = label[:22] + "..."
+                        labels[node] = label
+                    
+                    fig, ax = plt.subplots(figsize=(14, 10))
+                    
+                    # Layout com menos iterações para rapidez
+                    pos = nx.spring_layout(G_filtered, seed=42, k=0.3, iterations=80)
+                    
+                    # Desenha arestas (com transparência e espessura baseada no peso)
+                    edges = G_filtered.edges(data=True)
+                    edge_weights = [data.get('weight', 1) for _, _, data in edges]
+                    if edge_weights:
+                        max_weight = max(edge_weights) if edge_weights else 1
+                        edge_widths = [1 + (w / max_weight) * 2 for w in edge_weights]
+                    else:
+                        edge_widths = [1] * len(edges)
+                    
+                    nx.draw_networkx_edges(
+                        G_filtered, pos, ax=ax, 
+                        alpha=0.3, width=edge_widths, edge_color='gray'
+                    )
+                    
+                    # Desenha nós (com tamanho e cor variáveis)
+                    nx.draw_networkx_nodes(
+                        G_filtered, pos, ax=ax,
+                        node_size=sizes, node_color=colors, alpha=0.8, edgecolors='black', linewidths=0.5
+                    )
+                    
+                    # Desenha labels (com fonte pequena para não poluir)
+                    nx.draw_networkx_labels(
+                        G_filtered, pos, ax=ax, labels=labels, font_size=7, font_weight='bold'
+                    )
+                    
+                    ax.set_title(f"{title} (top {displayed_nodes} nós)", fontsize=14, fontweight='bold')
                     ax.axis('off')
+                    
+                    # Ajusta layout para não cortar labels
+                    plt.tight_layout()
+                    
+                    # Exibe no Streamlit
                     st.pyplot(fig)
                     plt.close(fig)
-                    st.caption("Versão estática (imagem fixa).")
-                except Exception as e2:
-                    st.error(f"Erro ao gerar visualização estática: {e2}")
+                    
+                    st.caption("📌 Versão estática (imagem fixa). Clique em 'Interativo' para explorar.")
+                    
+                except Exception as e:
+                    st.error(f"❌ Erro ao gerar visualização estática: {e}")
         
         # Botões com spinner e feedback
         col_g1, col_g2, col_g3 = st.columns(3)
