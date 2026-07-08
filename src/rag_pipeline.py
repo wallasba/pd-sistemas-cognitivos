@@ -1,14 +1,11 @@
 # src/rag_pipeline.py
 # ============================================================
-# VERSÃO HÍBRIDA: RAG + ESTATÍSTICAS DO CORPUS
+# VERSÃO DEFINITIVA – SEM ESTATÍSTICAS, APENAS RAG COM LLM
 # ============================================================
 
 import pandas as pd
-import numpy as np
 import re
-from typing import List, Dict, Any, Optional
-from collections import Counter
-from sklearn.feature_extraction.text import CountVectorizer
+from typing import List, Dict, Optional
 from sentence_transformers import SentenceTransformer
 import faiss
 from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
@@ -19,11 +16,11 @@ class RAGPipeline:
         self,
         corpus_path: str,
         text_column: str = 'abstract_clean',
-        llm_model_name: str = "HuggingFaceTB/SmolLM2-360M-Instruct",
+        llm_model_name: str = "HuggingFaceTB/SmolLM2-1.7B-Instruct",
         embedding_model_name: str = "all-MiniLM-L6-v2",
         chunk_size: int = 300,
         chunk_overlap: int = 50,
-        k_retrieval: int = 7
+        k_retrieval: int = 10
     ):
         self.text_column = text_column
         self.chunk_size = chunk_size
@@ -39,7 +36,7 @@ class RAGPipeline:
             self.df = self.df.dropna(subset=['year'])
             self.df['year'] = self.df['year'].astype(int)
             print(f"   Anos disponíveis: {sorted(self.df['year'].unique())}")
-        
+
         if text_column not in self.df.columns:
             if 'abstract' in self.df.columns:
                 self.text_column = 'abstract'
@@ -49,9 +46,6 @@ class RAGPipeline:
             self.text_column = text_column
 
         self.df[self.text_column] = self.df[self.text_column].fillna('')
-
-        # Pré-calcula termos frequentes (para respostas estatísticas)
-        self._compute_term_frequencies()
 
         print("[2/4] Preparando chunks...")
         self.chunks = []
@@ -66,16 +60,6 @@ class RAGPipeline:
         self.llm_pipe, self.tokenizer = self._load_llm()
 
         print("✅ Pipeline RAG pronto!")
-
-    def _compute_term_frequencies(self):
-        """Pré-calcula termos mais frequentes para respostas estatísticas."""
-        all_text = ' '.join(self.df[self.text_column].fillna(''))
-        vectorizer = CountVectorizer(stop_words='english', max_features=100)
-        X = vectorizer.fit_transform([all_text])
-        terms = vectorizer.get_feature_names_out()
-        counts = X.toarray()[0]
-        self.term_freq = list(zip(terms, counts))
-        self.term_freq.sort(key=lambda x: x[1], reverse=True)
 
     def _prepare_chunks(self):
         for idx, row in self.df.iterrows():
@@ -156,123 +140,7 @@ class RAGPipeline:
         return results
 
     # ============================================================
-    # RESPOSTAS ESTATÍSTICAS (SEM LLM)
-    # ============================================================
-    def _answer_trends(self) -> str:
-        """Responde 'principais tendências' com base nos termos mais frequentes."""
-        top_terms = [term for term, _ in self.term_freq[:15]]
-        return "**Principais tópicos (termos mais frequentes no corpus):**\n" + "\n".join(f"- {t}" for t in top_terms)
-
-    def _answer_applications(self) -> str:
-        """Responde 'aplicações' buscando termos que co-ocorrem com 'application'."""
-        # Busca trechos com 'application' ou 'applied' e extrai termos próximos
-        relevant_chunks = []
-        for chunk in self.chunks:
-            if re.search(r'\b(application|applied|use|using)\b', chunk, re.IGNORECASE):
-                relevant_chunks.append(chunk)
-        if not relevant_chunks:
-            return "Não encontrei menções a aplicações no corpus."
-        # Extrai termos frequentes nesses chunks
-        text = ' '.join(relevant_chunks)
-        vectorizer = CountVectorizer(stop_words='english', max_features=20)
-        X = vectorizer.fit_transform([text])
-        terms = vectorizer.get_feature_names_out()
-        return "**Aplicações mencionadas:**\n" + "\n".join(f"- {t}" for t in terms[:10])
-
-    def _answer_challenges(self) -> str:
-        """Responde 'desafios' buscando termos com 'challenge' ou 'limitation'."""
-        relevant_chunks = []
-        for chunk in self.chunks:
-            if re.search(r'\b(challenge|limitation|issue|problem)\b', chunk, re.IGNORECASE):
-                relevant_chunks.append(chunk)
-        if not relevant_chunks:
-            return "Não encontrei menções a desafios no corpus."
-        text = ' '.join(relevant_chunks)
-        vectorizer = CountVectorizer(stop_words='english', max_features=20)
-        X = vectorizer.fit_transform([text])
-        terms = vectorizer.get_feature_names_out()
-        return "**Desafios mencionados:**\n" + "\n".join(f"- {t}" for t in terms[:10])
-
-    # ============================================================
-    # MÉTODO ANSWER PRINCIPAL
-    # ============================================================
-    def answer(self, query: str, prompt_type: str = "zero_shot",
-               include_context: bool = True, k: int = None,
-               max_new_tokens: int = 250, temperature: float = 0.3) -> Dict:
-        """Pipeline com fallback estatístico para perguntas abertas."""
-        q_lower = query.lower().strip()
-
-        # ========== FALLBACK FACTUAL ==========
-        if "artigo mais recente" in q_lower or "último artigo" in q_lower:
-            resposta = self._get_latest_article()
-            if resposta:
-                return {"answer": resposta, "retrieved_context": [], "metadata": {"type": "factual"}, "full_response": {"raw_answer": resposta}}
-        if "ano do artigo mais recente" in q_lower:
-            resposta = self._get_latest_article_year()
-            if resposta:
-                return {"answer": resposta, "retrieved_context": [], "metadata": {"type": "factual"}, "full_response": {"raw_answer": resposta}}
-        if "quantos artigos" in q_lower or "total de artigos" in q_lower:
-            resposta = f"O corpus contém **{len(self.df)}** artigos."
-            return {"answer": resposta, "retrieved_context": [], "metadata": {"type": "factual"}, "full_response": {"raw_answer": resposta}}
-
-        # ========== FALLBACK ESTATÍSTICO ==========
-        if "tendência" in q_lower or "tendências" in q_lower:
-            return {"answer": self._answer_trends(), "retrieved_context": [], "metadata": {"type": "statistical"}, "full_response": {"raw_answer": self._answer_trends()}}
-        if "aplicação" in q_lower or "aplicações" in q_lower:
-            return {"answer": self._answer_applications(), "retrieved_context": [], "metadata": {"type": "statistical"}, "full_response": {"raw_answer": self._answer_applications()}}
-        if "desafio" in q_lower or "desafios" in q_lower or "limitação" in q_lower:
-            return {"answer": self._answer_challenges(), "retrieved_context": [], "metadata": {"type": "statistical"}, "full_response": {"raw_answer": self._answer_challenges()}}
-
-        # ========== RAG (LLM) PARA OUTRAS PERGUNTAS ==========
-        if k is None:
-            k = self.k_retrieval
-        retrieved = self.retrieve(query, k) if include_context else []
-        context_text = "\n\n---\n\n".join([r['chunk'] for r in retrieved]) if retrieved else "Nenhum contexto encontrado."
-
-        # Prompt mais estruturado
-        prompt = self._build_prompt(query, context_text, prompt_type)
-        outputs = self.llm_pipe(
-            prompt,
-            max_new_tokens=max_new_tokens,
-            temperature=temperature,
-            do_sample=True,
-            top_p=0.9,
-            repetition_penalty=1.4,
-            eos_token_id=self.tokenizer.eos_token_id
-        )
-        raw_text = outputs[0]['generated_text']
-        if prompt in raw_text:
-            answer = raw_text.replace(prompt, "").strip()
-        else:
-            answer = raw_text.strip()
-
-        # Pós-processamento: detecta repetição
-        if len(answer) < 15 or answer.count("o ano que") > 2 or answer.count("Pesquisa") > 10:
-            answer = "Não encontrei informações suficientes no corpus para responder a essa pergunta."
-
-        return {
-            "answer": answer,
-            "retrieved_context": retrieved,
-            "metadata": {"type": "rag", "prompt_type": prompt_type, "k_retrieved": k},
-            "full_response": {"raw_answer": answer}
-        }
-
-    def _build_prompt(self, query: str, context: str, prompt_type: str = "zero_shot") -> str:
-        system_prompt = (
-            "Você é um assistente de pesquisa. Responda APENAS com base no contexto fornecido. "
-            "Se o contexto não tiver a informação, diga: 'Não encontrei essa informação no corpus.' "
-            "Seja objetivo, conciso e use bullet points quando apropriado. "
-            "NUNCA repita frases ou palavras."
-        )
-        user_content = f"Contexto:\n{context}\n\nPergunta: {query}\n\nResposta (objetiva, sem repetições):"
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_content}
-        ]
-        return self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-
-    # ============================================================
-    # FUNÇÕES FACTUAIS
+    # RESPOSTAS FACTUAIS (DIRETO DO DATAFRAME)
     # ============================================================
     def _get_latest_article(self) -> str:
         if 'year' not in self.df.columns or 'title' not in self.df.columns:
@@ -301,3 +169,185 @@ class RAGPipeline:
             return None
         max_year = int(df_year['year'].max())
         return f"O ano do artigo mais recente é **{max_year}**."
+
+    def _get_total_articles(self) -> str:
+        return f"O corpus contém **{len(self.df)}** artigos."
+
+    # ============================================================
+    # NÚCLEO DO RAG – RESPOSTAS EM LINGUAGEM NATURAL
+    # ============================================================
+    def _answer_with_rag(self, query: str) -> Dict:
+        """Usa RAG para responder perguntas abertas com síntese em linguagem natural."""
+        # 1. Recupera chunks
+        retrieved = self.retrieve(query, self.k_retrieval)
+        if not retrieved:
+            return {
+                "answer": "Não encontrei informações relevantes no corpus para responder a essa pergunta.",
+                "retrieved_context": []
+            }
+        
+        # 2. Constrói contexto com metadados
+        context_parts = []
+        for r in retrieved:
+            meta = r['metadata']
+            year = meta.get('year', 'ano desconhecido')
+            title = meta.get('title', 'Sem título')
+            context_parts.append(f"[{title} ({year})]\n{r['chunk']}")
+        context_text = "\n\n---\n\n".join(context_parts)
+        
+        # 3. Prompt principal – extremamente rigoroso
+        system_prompt = (
+            "Você é um assistente de pesquisa especializado em análise de artigos científicos. "
+            "Sua tarefa é responder à pergunta do usuário com base EXCLUSIVAMENTE nos trechos de artigos fornecidos. "
+            "Você DEVE produzir uma resposta em linguagem natural, coerente, bem estruturada e organizada em parágrafos. "
+            "NUNCA liste palavras-chave, termos isolados, tokens ou qualquer coisa que não seja uma frase completa. "
+            "NUNCA use frases como 'Desafios mencionados:' e depois liste palavras. "
+            "Se os trechos mencionarem múltiplos pontos, escreva um texto corrido consolidando-os. "
+            "Se houver divergências entre os artigos, destaque essas diferenças. "
+            "Se a informação solicitada não estiver presente nos trechos, diga explicitamente: "
+            "'Não encontrei informações suficientes no corpus para responder a essa pergunta.' "
+            "NUNCA invente informações. NUNCA use conhecimento externo. "
+            "Sua resposta deve ser útil para um pesquisador."
+        )
+        user_content = f"""
+        Trechos de artigos (com título e ano):
+        {context_text}
+        
+        Pergunta do usuário: {query}
+        
+        Resposta (em linguagem natural, baseada EXCLUSIVAMENTE nos trechos):
+        """
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_content}
+        ]
+        prompt = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        
+        # 4. Geração com parâmetros conservadores
+        outputs = self.llm_pipe(
+            prompt,
+            max_new_tokens=600,
+            temperature=0.2,
+            do_sample=True,
+            top_p=0.9,
+            repetition_penalty=1.2,
+            eos_token_id=self.tokenizer.eos_token_id
+        )
+        raw_text = outputs[0]['generated_text']
+        if prompt in raw_text:
+            answer = raw_text.replace(prompt, "").strip()
+        else:
+            answer = raw_text.strip()
+        
+        # 5. Verificação e fallback se a resposta ainda for uma lista
+        if self._is_list_response(answer):
+            # Fallback com prompt alternativo
+            fallback_prompt = self._build_fallback_prompt(query, retrieved)
+            outputs2 = self.llm_pipe(
+                fallback_prompt,
+                max_new_tokens=600,
+                temperature=0.2,
+                do_sample=True,
+                top_p=0.9,
+                repetition_penalty=1.3,
+                eos_token_id=self.tokenizer.eos_token_id
+            )
+            raw_text2 = outputs2[0]['generated_text']
+            if fallback_prompt in raw_text2:
+                answer = raw_text2.replace(fallback_prompt, "").strip()
+            else:
+                answer = raw_text2.strip()
+            
+            # Se ainda for lista, resposta padrão
+            if self._is_list_response(answer):
+                answer = "Não foi possível gerar uma resposta coerente com os trechos recuperados. Tente reformular a pergunta ou amplie o corpus."
+        
+        # 6. Garantir tamanho mínimo
+        if len(answer) < 30:
+            answer = "Não encontrei informações suficientes no corpus para responder a essa pergunta."
+        
+        return {
+            "answer": answer,
+            "retrieved_context": retrieved
+        }
+
+    def _is_list_response(self, text: str) -> bool:
+        """Verifica se a resposta parece uma lista de palavras-chave."""
+        if not text:
+            return True
+        # Divide em linhas
+        lines = [l.strip() for l in text.split('\n') if l.strip()]
+        # Se todas as linhas têm 1-2 palavras e nenhuma contém verbos
+        if len(lines) > 2:
+            word_counts = [len(l.split()) for l in lines]
+            if all(c <= 3 for c in word_counts):
+                return True
+        # Se o texto tem menos de 15 palavras e contém palavras comuns de lista
+        words = text.split()
+        if len(words) < 15:
+            list_indicators = ['analysis', 'artificial', 'based', 'data', 'development', 'infrastructure', 
+                              'intelligence', 'management', 'model', 'models', 'research', 'systems']
+            if any(word in text.lower() for word in list_indicators):
+                return True
+        return False
+
+    def _build_fallback_prompt(self, query: str, retrieved: List[Dict]) -> str:
+        """Prompt alternativo para forçar resposta em parágrafos."""
+        context_parts = []
+        for r in retrieved[:5]:
+            meta = r['metadata']
+            context_parts.append(f"- {meta.get('title', 'Sem título')} ({meta.get('year', '')}): {r['chunk'][:400]}...")
+        context_text = "\n".join(context_parts)
+        
+        system_prompt = (
+            "Com base nos trechos abaixo, responda à pergunta em UM PARÁGRAFO conciso. "
+            "NÃO use listas, bullets ou palavras-chave. Apenas um texto corrido e coerente."
+        )
+        user_content = f"""
+        Trechos:
+        {context_text}
+        
+        Pergunta: {query}
+        
+        Resposta (um parágrafo apenas):
+        """
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_content}
+        ]
+        return self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+
+    # ============================================================
+    # MÉTODO ANSWER PRINCIPAL – TODAS AS PERGUNTAS VÃO PARA RAG
+    # ============================================================
+    def answer(self, query: str, prompt_type: str = "zero_shot",
+               include_context: bool = True, k: int = None,
+               max_new_tokens: int = 600, temperature: float = 0.2) -> Dict:
+        """
+        Método principal: para perguntas factuais, responde diretamente.
+        Para TODAS as outras, usa RAG com LLM.
+        """
+        q_lower = query.lower().strip()
+
+        # ===== FACTUAIS: respondidas diretamente =====
+        if "artigo mais recente" in q_lower or "último artigo" in q_lower:
+            resposta = self._get_latest_article()
+            if resposta:
+                return {"answer": resposta, "retrieved_context": [], "metadata": {"type": "factual"}}
+        if "ano do artigo mais recente" in q_lower:
+            resposta = self._get_latest_article_year()
+            if resposta:
+                return {"answer": resposta, "retrieved_context": [], "metadata": {"type": "factual"}}
+        if "quantos artigos" in q_lower or "total de artigos" in q_lower:
+            resposta = self._get_total_articles()
+            return {"answer": resposta, "retrieved_context": [], "metadata": {"type": "factual"}}
+
+        # ===== TODAS AS OUTRAS: RAG =====
+        # Se a pergunta contém palavras-chave abertas, usa RAG
+        # Caso contrário, também usa RAG (porque não temos outra forma)
+        result = self._answer_with_rag(query)
+        return {
+            "answer": result["answer"],
+            "retrieved_context": result["retrieved_context"],
+            "metadata": {"type": "rag"}
+        }
