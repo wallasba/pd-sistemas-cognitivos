@@ -1,7 +1,9 @@
-# app.py
 import streamlit as st
 from ui.sidebar import render_sidebar
 from ui.wizard import render_wizard
+import os
+from dotenv import load_dotenv
+load_dotenv()
 
 # ============================================================
 # CONFIGURAÇÃO DA PÁGINA

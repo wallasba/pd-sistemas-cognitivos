@@ -1,33 +1,40 @@
 # src/rag_pipeline.py
 # ============================================================
-# VERSÃO DEFINITIVA – SEM ESTATÍSTICAS, APENAS RAG COM LLM
+# VERSÃO SIMPLIFICADA COM LOGS PARA DEPURAÇÃO
 # ============================================================
 
+import os
 import pandas as pd
 import re
 from typing import List, Dict, Optional
 from sentence_transformers import SentenceTransformer
 import faiss
-from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
-import torch
+from huggingface_hub import InferenceClient
 
 class RAGPipeline:
     def __init__(
         self,
         corpus_path: str,
         text_column: str = 'abstract_clean',
-        llm_model_name: str = "HuggingFaceTB/SmolLM2-1.7B-Instruct",
         embedding_model_name: str = "all-MiniLM-L6-v2",
         chunk_size: int = 300,
         chunk_overlap: int = 50,
-        k_retrieval: int = 10
+        k_retrieval: int = 10,
+        hf_token: Optional[str] = None,
+        api_model: str = "microsoft/Phi-3-mini-4k-instruct",
+        response_language: str = "português"
     ):
         self.text_column = text_column
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
         self.k_retrieval = k_retrieval
-        self.llm_model_name = llm_model_name
-        self.embedding_model_name = embedding_model_name
+        self.api_model = api_model
+        self.response_language = response_language
+
+        self.hf_token = hf_token or os.getenv("HF_TOKEN")
+        if not self.hf_token:
+            raise ValueError("HF_TOKEN não encontrado.")
+        self.client = InferenceClient(token=self.hf_token)
 
         print("[1/4] Carregando corpus...")
         self.df = pd.read_csv(corpus_path)
@@ -56,9 +63,7 @@ class RAGPipeline:
         self.embedding_model = SentenceTransformer(embedding_model_name)
         self.index, self.chunk_vectors = self._build_faiss_index()
 
-        print("[4/4] Carregando LLM local...")
-        self.llm_pipe, self.tokenizer = self._load_llm()
-
+        print("[4/4] Pipeline RAG pronto (usando API)!")
         print("✅ Pipeline RAG pronto!")
 
     def _prepare_chunks(self):
@@ -100,29 +105,6 @@ class RAGPipeline:
         index.add(vectors)
         return index, vectors
 
-    def _load_llm(self):
-        tokenizer = AutoTokenizer.from_pretrained(
-            self.llm_model_name,
-            trust_remote_code=True
-        )
-        if tokenizer.pad_token is None:
-            tokenizer.pad_token = tokenizer.eos_token
-
-        model = AutoModelForCausalLM.from_pretrained(
-            self.llm_model_name,
-            device_map="auto",
-            torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
-            trust_remote_code=True
-        )
-        generator = pipeline(
-            "text-generation",
-            model=model,
-            tokenizer=tokenizer,
-            device_map="auto",
-            torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
-        )
-        return generator, tokenizer
-
     def retrieve(self, query: str, k: int = None) -> List[Dict]:
         if k is None:
             k = self.k_retrieval
@@ -140,7 +122,7 @@ class RAGPipeline:
         return results
 
     # ============================================================
-    # RESPOSTAS FACTUAIS (DIRETO DO DATAFRAME)
+    # FACTUAIS
     # ============================================================
     def _get_latest_article(self) -> str:
         if 'year' not in self.df.columns or 'title' not in self.df.columns:
@@ -174,96 +156,75 @@ class RAGPipeline:
         return f"O corpus contém **{len(self.df)}** artigos."
 
     # ============================================================
-    # NÚCLEO DO RAG – RESPOSTAS EM LINGUAGEM NATURAL
+    # GERAÇÃO VIA API
+    # ============================================================
+    def _generate_with_api(self, prompt: str, max_tokens: int = 600, temperature: float = 0.2) -> Optional[str]:
+        """Gera resposta usando a Inference API."""
+        try:
+            system_msg = (
+                f"Você é um assistente de pesquisa. Responda em {self.response_language}. "
+                "Sua resposta deve ser baseada APENAS nos trechos fornecidos. Use parágrafos."
+            )
+            messages = [
+                {"role": "system", "content": system_msg},
+                {"role": "user", "content": prompt}
+            ]
+            print(f"\n[LOG] Enviando prompt para API (modelo: {self.api_model})...")
+            print(f"[LOG] Prompt (primeiros 300 caracteres): {prompt[:300]}...")
+            completion = self.client.chat.completions.create(
+                model=self.api_model,
+                messages=messages,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                top_p=0.9,
+            )
+            answer = completion.choices[0].message.content.strip()
+            print(f"[LOG] Resposta recebida (primeiros 200 caracteres): {answer[:200]}...")
+            return answer
+        except Exception as e:
+            print(f"[ERRO] Falha na API: {e}")
+            return None
+
+    # ============================================================
+    # RAG PARA PERGUNTAS ABERTAS
     # ============================================================
     def _answer_with_rag(self, query: str) -> Dict:
-        """Usa RAG para responder perguntas abertas com síntese em linguagem natural."""
-        # 1. Recupera chunks
+        # Recupera chunks
         retrieved = self.retrieve(query, self.k_retrieval)
+        print(f"[LOG] {len(retrieved)} chunks recuperados.")
         if not retrieved:
             return {
                 "answer": "Não encontrei informações relevantes no corpus para responder a essa pergunta.",
                 "retrieved_context": []
             }
         
-        # 2. Constrói contexto com metadados
+        # Mostra os primeiros chunks no terminal
+        for i, r in enumerate(retrieved[:3]):
+            print(f"[LOG] Chunk {i+1} (score: {r['score']:.4f}): {r['chunk'][:100]}...")
+        
+        # Constrói contexto resumido (para não estourar o contexto)
         context_parts = []
-        for r in retrieved:
+        for r in retrieved[:8]:
             meta = r['metadata']
             year = meta.get('year', 'ano desconhecido')
             title = meta.get('title', 'Sem título')
-            context_parts.append(f"[{title} ({year})]\n{r['chunk']}")
+            context_parts.append(f"[{title} ({year})]\n{r['chunk'][:500]}")  # Limita a 500 caracteres por chunk
         context_text = "\n\n---\n\n".join(context_parts)
         
-        # 3. Prompt principal – extremamente rigoroso
-        system_prompt = (
-            "Você é um assistente de pesquisa especializado em análise de artigos científicos. "
-            "Sua tarefa é responder à pergunta do usuário com base EXCLUSIVAMENTE nos trechos de artigos fornecidos. "
-            "Você DEVE produzir uma resposta em linguagem natural, coerente, bem estruturada e organizada em parágrafos. "
-            "NUNCA liste palavras-chave, termos isolados, tokens ou qualquer coisa que não seja uma frase completa. "
-            "NUNCA use frases como 'Desafios mencionados:' e depois liste palavras. "
-            "Se os trechos mencionarem múltiplos pontos, escreva um texto corrido consolidando-os. "
-            "Se houver divergências entre os artigos, destaque essas diferenças. "
-            "Se a informação solicitada não estiver presente nos trechos, diga explicitamente: "
-            "'Não encontrei informações suficientes no corpus para responder a essa pergunta.' "
-            "NUNCA invente informações. NUNCA use conhecimento externo. "
-            "Sua resposta deve ser útil para um pesquisador."
-        )
-        user_content = f"""
-        Trechos de artigos (com título e ano):
+        # Prompt direto
+        prompt = f"""
+        Trechos de artigos:
         {context_text}
         
-        Pergunta do usuário: {query}
+        Pergunta: {query}
         
-        Resposta (em linguagem natural, baseada EXCLUSIVAMENTE nos trechos):
+        Responda em {self.response_language} com base APENAS nos trechos.
         """
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_content}
-        ]
-        prompt = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
         
-        # 4. Geração com parâmetros conservadores
-        outputs = self.llm_pipe(
-            prompt,
-            max_new_tokens=600,
-            temperature=0.2,
-            do_sample=True,
-            top_p=0.9,
-            repetition_penalty=1.2,
-            eos_token_id=self.tokenizer.eos_token_id
-        )
-        raw_text = outputs[0]['generated_text']
-        if prompt in raw_text:
-            answer = raw_text.replace(prompt, "").strip()
-        else:
-            answer = raw_text.strip()
-        
-        # 5. Verificação e fallback se a resposta ainda for uma lista
-        if self._is_list_response(answer):
-            # Fallback com prompt alternativo
-            fallback_prompt = self._build_fallback_prompt(query, retrieved)
-            outputs2 = self.llm_pipe(
-                fallback_prompt,
-                max_new_tokens=600,
-                temperature=0.2,
-                do_sample=True,
-                top_p=0.9,
-                repetition_penalty=1.3,
-                eos_token_id=self.tokenizer.eos_token_id
-            )
-            raw_text2 = outputs2[0]['generated_text']
-            if fallback_prompt in raw_text2:
-                answer = raw_text2.replace(fallback_prompt, "").strip()
-            else:
-                answer = raw_text2.strip()
-            
-            # Se ainda for lista, resposta padrão
-            if self._is_list_response(answer):
-                answer = "Não foi possível gerar uma resposta coerente com os trechos recuperados. Tente reformular a pergunta ou amplie o corpus."
-        
-        # 6. Garantir tamanho mínimo
-        if len(answer) < 30:
+        answer = self._generate_with_api(prompt)
+        if not answer:
+            answer = "Não foi possível obter uma resposta da API. Verifique sua conexão e token."
+        elif len(answer) < 20:
             answer = "Não encontrei informações suficientes no corpus para responder a essa pergunta."
         
         return {
@@ -271,65 +232,16 @@ class RAGPipeline:
             "retrieved_context": retrieved
         }
 
-    def _is_list_response(self, text: str) -> bool:
-        """Verifica se a resposta parece uma lista de palavras-chave."""
-        if not text:
-            return True
-        # Divide em linhas
-        lines = [l.strip() for l in text.split('\n') if l.strip()]
-        # Se todas as linhas têm 1-2 palavras e nenhuma contém verbos
-        if len(lines) > 2:
-            word_counts = [len(l.split()) for l in lines]
-            if all(c <= 3 for c in word_counts):
-                return True
-        # Se o texto tem menos de 15 palavras e contém palavras comuns de lista
-        words = text.split()
-        if len(words) < 15:
-            list_indicators = ['analysis', 'artificial', 'based', 'data', 'development', 'infrastructure', 
-                              'intelligence', 'management', 'model', 'models', 'research', 'systems']
-            if any(word in text.lower() for word in list_indicators):
-                return True
-        return False
-
-    def _build_fallback_prompt(self, query: str, retrieved: List[Dict]) -> str:
-        """Prompt alternativo para forçar resposta em parágrafos."""
-        context_parts = []
-        for r in retrieved[:5]:
-            meta = r['metadata']
-            context_parts.append(f"- {meta.get('title', 'Sem título')} ({meta.get('year', '')}): {r['chunk'][:400]}...")
-        context_text = "\n".join(context_parts)
-        
-        system_prompt = (
-            "Com base nos trechos abaixo, responda à pergunta em UM PARÁGRAFO conciso. "
-            "NÃO use listas, bullets ou palavras-chave. Apenas um texto corrido e coerente."
-        )
-        user_content = f"""
-        Trechos:
-        {context_text}
-        
-        Pergunta: {query}
-        
-        Resposta (um parágrafo apenas):
-        """
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_content}
-        ]
-        return self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-
     # ============================================================
-    # MÉTODO ANSWER PRINCIPAL – TODAS AS PERGUNTAS VÃO PARA RAG
+    # ANSWER PRINCIPAL
     # ============================================================
     def answer(self, query: str, prompt_type: str = "zero_shot",
                include_context: bool = True, k: int = None,
                max_new_tokens: int = 600, temperature: float = 0.2) -> Dict:
-        """
-        Método principal: para perguntas factuais, responde diretamente.
-        Para TODAS as outras, usa RAG com LLM.
-        """
         q_lower = query.lower().strip()
+        print(f"\n[LOG] Nova pergunta: {query}")
 
-        # ===== FACTUAIS: respondidas diretamente =====
+        # FACTUAL
         if "artigo mais recente" in q_lower or "último artigo" in q_lower:
             resposta = self._get_latest_article()
             if resposta:
@@ -342,9 +254,7 @@ class RAGPipeline:
             resposta = self._get_total_articles()
             return {"answer": resposta, "retrieved_context": [], "metadata": {"type": "factual"}}
 
-        # ===== TODAS AS OUTRAS: RAG =====
-        # Se a pergunta contém palavras-chave abertas, usa RAG
-        # Caso contrário, também usa RAG (porque não temos outra forma)
+        # ABERTAS: RAG
         result = self._answer_with_rag(query)
         return {
             "answer": result["answer"],

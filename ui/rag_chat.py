@@ -1,6 +1,7 @@
 # ui/rag_chat.py
 import streamlit as st
 import tempfile
+import os
 from src.rag_pipeline import RAGPipeline
 
 def render_rag_chat(df):
@@ -12,34 +13,39 @@ def render_rag_chat(df):
         return
 
     if st.session_state.rag_pipeline is None:
-        with st.spinner("Carregando pipeline RAG (embeddings + LLM) – primeira vez pode demorar..."):
+        with st.spinner("Carregando pipeline RAG (embeddings + API)..."):
             temp_csv = tempfile.NamedTemporaryFile(suffix=".csv", delete=False)
             df[['title', 'abstract_clean', 'source', 'year']].to_csv(temp_csv.name, index=False)
             temp_csv.close()
             try:
+                hf_token = os.getenv("HF_TOKEN")
+                if not hf_token:
+                    hf_token = st.text_input("Digite seu token da Hugging Face:", type="password")
+                    if not hf_token:
+                        st.stop()
+
                 st.session_state.rag_pipeline = RAGPipeline(
                     corpus_path=temp_csv.name,
                     text_column='abstract_clean',
-                    llm_model_name="HuggingFaceTB/SmolLM2-1.7B-Instruct",
                     embedding_model_name="all-MiniLM-L6-v2",
-                    k_retrieval=10
+                    k_retrieval=10,
+                    hf_token=hf_token,
+                    api_model="microsoft/Phi-3-mini-4k-instruct",  
+                    response_language="português"
                 )
                 st.success("Pipeline RAG carregado!")
-                if hasattr(st.session_state.rag_pipeline, 'df'):
-                    years = st.session_state.rag_pipeline.df['year'].dropna().unique()
-                    years_sorted = sorted(years)
-                    st.info(f"📊 Anos disponíveis no corpus: {years_sorted}")
+                years = st.session_state.rag_pipeline.df['year'].dropna().unique()
+                st.info(f"📊 Anos disponíveis: {sorted(years)}")
             except Exception as e:
-                st.error(f"Erro ao carregar RAG: {e}")
+                st.error(f"Erro: {e}")
                 return
 
     question_masks = [
         "Quais são os desafios éticos mencionados nos artigos?",
         "Quais as tendências recentes (2026) em IA?",
+        "qual o impacto da ia na engenharia de transportes?",
         "Quais são as principais aplicações da IA mencionadas?",
-        "Quais são as principais instituições que publicam sobre deep learning?",
-        "Quem são os autores mais prolíficos na área de PLN?",
-        "qual o artigo mais recente do corpus? qual o ano?"
+        "qual o artigo mais recente do corpus?"
     ]
     selected_question = st.selectbox("Escolha uma pergunta de exemplo (ou digite a sua):",
                                      ["(Digitar própria)"] + question_masks)
@@ -49,24 +55,16 @@ def render_rag_chat(df):
     if st.button("Enviar pergunta", type="primary"):
         if user_question and st.session_state.rag_pipeline:
             with st.spinner("Processando..."):
-                result = st.session_state.rag_pipeline.answer(
-                    user_question,
-                    temperature=0.2,
-                    max_new_tokens=600
-                )
-                answer = result['answer']
+                result = st.session_state.rag_pipeline.answer(user_question)
                 st.markdown("**Resposta:**")
-                st.write(answer)
+                st.write(result['answer'])
                 
-                if "Não encontrei" in answer or "não foi possível" in answer:
-                    st.info("💡 Tente reformular a pergunta com termos mais específicos ou amplie o corpus.")
-                
-                with st.expander("📚 Ver trechos recuperados (contexto)"):
+                with st.expander("📚 Ver trechos recuperados"):
                     if result.get('retrieved_context'):
                         for i, ctx in enumerate(result['retrieved_context']):
                             st.caption(f"Trecho {i+1} (score: {ctx['score']:.4f})")
                             st.caption(f"Fonte: {ctx['metadata']['title']} ({ctx['metadata']['year']})")
-                            st.text(ctx['chunk'][:500] + "...")
+                            st.text(ctx['chunk'][:300] + "...")
                             st.divider()
                     else:
                         st.info("Nenhum trecho recuperado.")
