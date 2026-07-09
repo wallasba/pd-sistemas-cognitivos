@@ -13,15 +13,16 @@ def render_rag_chat(df):
         return
 
     if st.session_state.rag_pipeline is None:
-        with st.spinner("Carregando pipeline RAG (embeddings + API)..."):
+        with st.spinner("Carregando pipeline RAG (embeddings + Groq)..."):
             temp_csv = tempfile.NamedTemporaryFile(suffix=".csv", delete=False)
             df[['title', 'abstract_clean', 'source', 'year']].to_csv(temp_csv.name, index=False)
             temp_csv.close()
             try:
-                hf_token = os.getenv("HF_TOKEN")
-                if not hf_token:
-                    hf_token = st.text_input("Digite seu token da Hugging Face:", type="password")
-                    if not hf_token:
+                # Pega a chave da variável de ambiente ou solicita no UI
+                groq_api_key = os.getenv("GROQ_API_KEY")
+                if not groq_api_key:
+                    groq_api_key = st.text_input("Digite sua chave da API Groq:", type="password")
+                    if not groq_api_key:
                         st.stop()
 
                 st.session_state.rag_pipeline = RAGPipeline(
@@ -29,17 +30,18 @@ def render_rag_chat(df):
                     text_column='abstract_clean',
                     embedding_model_name="all-MiniLM-L6-v2",
                     k_retrieval=10,
-                    hf_token=hf_token,
-                    api_model="microsoft/Phi-3-mini-4k-instruct",  
+                    groq_api_key=groq_api_key,
+                    api_model="llama-3.1-8b-instant",  # Modelo rápido. Opções: "llama-3.3-70b-versatile", "mixtral-8x7b-32768", "gemma2-9b-it"
                     response_language="português"
                 )
-                st.success("Pipeline RAG carregado!")
+                st.success("Pipeline RAG carregado (Groq)!")
                 years = st.session_state.rag_pipeline.df['year'].dropna().unique()
                 st.info(f"📊 Anos disponíveis: {sorted(years)}")
             except Exception as e:
                 st.error(f"Erro: {e}")
                 return
 
+    # Perguntas de exemplo
     question_masks = [
         "Quais são os desafios éticos mencionados nos artigos?",
         "Quais as tendências recentes (2026) em IA?",
@@ -54,7 +56,7 @@ def render_rag_chat(df):
     
     if st.button("Enviar pergunta", type="primary"):
         if user_question and st.session_state.rag_pipeline:
-            with st.spinner("Processando..."):
+            with st.spinner("Processando no Groq..."):
                 result = st.session_state.rag_pipeline.answer(user_question)
                 st.markdown("**Resposta:**")
                 st.write(result['answer'])

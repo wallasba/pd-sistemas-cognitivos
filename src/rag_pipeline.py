@@ -1,6 +1,6 @@
 # src/rag_pipeline.py
 # ============================================================
-# VERSÃO SIMPLIFICADA COM LOGS PARA DEPURAÇÃO
+# VERSÃO COM GROQ API
 # ============================================================
 
 import os
@@ -9,7 +9,7 @@ import re
 from typing import List, Dict, Optional
 from sentence_transformers import SentenceTransformer
 import faiss
-from huggingface_hub import InferenceClient
+from groq import Groq
 
 class RAGPipeline:
     def __init__(
@@ -20,8 +20,8 @@ class RAGPipeline:
         chunk_size: int = 300,
         chunk_overlap: int = 50,
         k_retrieval: int = 10,
-        hf_token: Optional[str] = None,
-        api_model: str = "microsoft/Phi-3-mini-4k-instruct",
+        groq_api_key: Optional[str] = None,
+        api_model: str = "llama-3.1-8b-instant",  # Modelo rápido e gratuito
         response_language: str = "português"
     ):
         self.text_column = text_column
@@ -31,10 +31,11 @@ class RAGPipeline:
         self.api_model = api_model
         self.response_language = response_language
 
-        self.hf_token = hf_token or os.getenv("HF_TOKEN")
-        if not self.hf_token:
-            raise ValueError("HF_TOKEN não encontrado.")
-        self.client = InferenceClient(token=self.hf_token)
+        # Inicializa o cliente Groq
+        self.api_key = groq_api_key or os.getenv("GROQ_API_KEY")
+        if not self.api_key:
+            raise ValueError("GROQ_API_KEY não encontrado. Defina a variável de ambiente ou passe no construtor.")
+        self.client = Groq(api_key=self.api_key)
 
         print("[1/4] Carregando corpus...")
         self.df = pd.read_csv(corpus_path)
@@ -63,7 +64,7 @@ class RAGPipeline:
         self.embedding_model = SentenceTransformer(embedding_model_name)
         self.index, self.chunk_vectors = self._build_faiss_index()
 
-        print("[4/4] Pipeline RAG pronto (usando API)!")
+        print("[4/4] Pipeline RAG pronto (usando Groq)!")
         print("✅ Pipeline RAG pronto!")
 
     def _prepare_chunks(self):
@@ -122,7 +123,7 @@ class RAGPipeline:
         return results
 
     # ============================================================
-    # FACTUAIS
+    # RESPOSTAS FACTUAIS
     # ============================================================
     def _get_latest_article(self) -> str:
         if 'year' not in self.df.columns or 'title' not in self.df.columns:
@@ -156,75 +157,62 @@ class RAGPipeline:
         return f"O corpus contém **{len(self.df)}** artigos."
 
     # ============================================================
-    # GERAÇÃO VIA API
+    # GERAÇÃO VIA GROQ
     # ============================================================
-    def _generate_with_api(self, prompt: str, max_tokens: int = 600, temperature: float = 0.2) -> Optional[str]:
-        """Gera resposta usando a Inference API."""
+    def _generate_with_groq(self, prompt: str, max_tokens: int = 600, temperature: float = 0.2) -> str:
+        """Gera resposta usando a API do Groq."""
         try:
-            system_msg = (
-                f"Você é um assistente de pesquisa. Responda em {self.response_language}. "
-                "Sua resposta deve ser baseada APENAS nos trechos fornecidos. Use parágrafos."
-            )
-            messages = [
-                {"role": "system", "content": system_msg},
-                {"role": "user", "content": prompt}
-            ]
-            print(f"\n[LOG] Enviando prompt para API (modelo: {self.api_model})...")
-            print(f"[LOG] Prompt (primeiros 300 caracteres): {prompt[:300]}...")
-            completion = self.client.chat.completions.create(
+            print(f"[LOG] Enviando prompt para Groq (modelo: {self.api_model})...")
+            response = self.client.chat.completions.create(
                 model=self.api_model,
-                messages=messages,
+                messages=[
+                    {"role": "system", "content": f"Você é um assistente de pesquisa. Responda em {self.response_language}. Baseie-se apenas nos trechos fornecidos. NUNCA liste palavras-chave ou termos isolados."},
+                    {"role": "user", "content": prompt}
+                ],
                 max_tokens=max_tokens,
                 temperature=temperature,
-                top_p=0.9,
             )
-            answer = completion.choices[0].message.content.strip()
+            answer = response.choices[0].message.content.strip()
             print(f"[LOG] Resposta recebida (primeiros 200 caracteres): {answer[:200]}...")
             return answer
         except Exception as e:
-            print(f"[ERRO] Falha na API: {e}")
+            print(f"[ERRO] Groq API: {e}")
             return None
 
-    # ============================================================
-    # RAG PARA PERGUNTAS ABERTAS
-    # ============================================================
     def _answer_with_rag(self, query: str) -> Dict:
-        # Recupera chunks
+        """Usa RAG para responder perguntas abertas."""
         retrieved = self.retrieve(query, self.k_retrieval)
-        print(f"[LOG] {len(retrieved)} chunks recuperados.")
         if not retrieved:
             return {
                 "answer": "Não encontrei informações relevantes no corpus para responder a essa pergunta.",
                 "retrieved_context": []
             }
         
-        # Mostra os primeiros chunks no terminal
+        # Mostra os primeiros chunks no terminal para debug
         for i, r in enumerate(retrieved[:3]):
             print(f"[LOG] Chunk {i+1} (score: {r['score']:.4f}): {r['chunk'][:100]}...")
         
-        # Constrói contexto resumido (para não estourar o contexto)
+        # Constrói contexto
         context_parts = []
         for r in retrieved[:8]:
             meta = r['metadata']
             year = meta.get('year', 'ano desconhecido')
             title = meta.get('title', 'Sem título')
-            context_parts.append(f"[{title} ({year})]\n{r['chunk'][:500]}")  # Limita a 500 caracteres por chunk
+            context_parts.append(f"[{title} ({year})]\n{r['chunk'][:500]}")
         context_text = "\n\n---\n\n".join(context_parts)
         
-        # Prompt direto
+        # Prompt
         prompt = f"""
         Trechos de artigos:
         {context_text}
         
         Pergunta: {query}
         
-        Responda em {self.response_language} com base APENAS nos trechos.
+        Responda em {self.response_language} com base APENAS nos trechos. Sua resposta deve ser em parágrafos.
         """
         
-        answer = self._generate_with_api(prompt)
-        if not answer:
-            answer = "Não foi possível obter uma resposta da API. Verifique sua conexão e token."
-        elif len(answer) < 20:
+        answer = self._generate_with_groq(prompt)
+        if not answer or len(answer) < 20:
             answer = "Não encontrei informações suficientes no corpus para responder a essa pergunta."
         
         return {
@@ -235,9 +223,7 @@ class RAGPipeline:
     # ============================================================
     # ANSWER PRINCIPAL
     # ============================================================
-    def answer(self, query: str, prompt_type: str = "zero_shot",
-               include_context: bool = True, k: int = None,
-               max_new_tokens: int = 600, temperature: float = 0.2) -> Dict:
+    def answer(self, query: str, **kwargs) -> Dict:
         q_lower = query.lower().strip()
         print(f"\n[LOG] Nova pergunta: {query}")
 
@@ -251,10 +237,9 @@ class RAGPipeline:
             if resposta:
                 return {"answer": resposta, "retrieved_context": [], "metadata": {"type": "factual"}}
         if "quantos artigos" in q_lower or "total de artigos" in q_lower:
-            resposta = self._get_total_articles()
-            return {"answer": resposta, "retrieved_context": [], "metadata": {"type": "factual"}}
+            return {"answer": self._get_total_articles(), "retrieved_context": [], "metadata": {"type": "factual"}}
 
-        # ABERTAS: RAG
+        # RAG
         result = self._answer_with_rag(query)
         return {
             "answer": result["answer"],
