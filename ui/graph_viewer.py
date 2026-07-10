@@ -1,6 +1,6 @@
 # ui/graph_viewer.py
 # ============================================================
-# VERSÃO COM DESTAQUE DAS ARESTAS MAIS FORTES
+# VERSÃO COM DESTAQUE PERSONALIZADO POR GRADIENTE DE CORES
 # ============================================================
 
 import streamlit as st
@@ -88,10 +88,13 @@ def display_graph(
     layout_iterations=100,
     show_labels=True,
     label_trim=25,
-    top_edges_to_highlight=10  # <-- NOVO PARÂMETRO
+    top_edges_to_highlight=10,
+    use_edge_color_gradient=True
 ):
     """
-    Exibe grafo estático (Matplotlib) com destaque das arestas mais fortes.
+    Exibe grafo estático com destaque personalizado das arestas mais fortes.
+    - top_edges_to_highlight: número de arestas com maior peso a destacar.
+    - use_edge_color_gradient: se True, usa gradiente de cores (vermelho) para as arestas destacadas.
     """
     if G is None or G.number_of_nodes() == 0:
         st.info(f"ℹ️ Sem dados para gerar o grafo '{title}'.")
@@ -102,6 +105,7 @@ def display_graph(
         st.info(f"ℹ️ Grafo muito pequeno para visualização (menos de 2 nós).")
         return
 
+    # Prepara atributos dos nós
     if G_filtered.nodes and 'size' not in G_filtered.nodes[next(iter(G_filtered.nodes))]:
         G_filtered = prepare_node_attributes(
             G_filtered,
@@ -120,7 +124,7 @@ def display_graph(
     st.caption(f"📊 Exibindo {displayed_nodes} nós (dos {total_nodes} totais).")
 
     try:
-        # --- Coleta tamanhos e cores dos nós ---
+        # Coleta atributos dos nós
         sizes = []
         colors = []
         labels = {}
@@ -132,68 +136,69 @@ def display_graph(
                 label = label[:label_trim-3] + "..."
             labels[node] = label
 
-        # --- Separa arestas por peso para destaque ---
+        # Ordena arestas por peso (decrescente)
         edges = list(G_filtered.edges(data=True))
         if edges:
-            # Ordena arestas por peso decrescente
             edges_sorted = sorted(edges, key=lambda x: x[2].get('weight', 0), reverse=True)
-            
-            # Separa top N e o restante
+            max_weight = max([e[2].get('weight', 1) for e in edges_sorted]) if edges_sorted else 1
+            min_weight = min([e[2].get('weight', 0) for e in edges_sorted]) if edges_sorted else 0
+        else:
+            edges_sorted = []
+            max_weight = 1
+            min_weight = 0
+
+        # Determina quantas arestas destacar
+        if top_edges_to_highlight > 0:
             highlight_count = min(top_edges_to_highlight, len(edges_sorted))
             edges_highlight = edges_sorted[:highlight_count]
             edges_other = edges_sorted[highlight_count:]
-            
-            # Define espessura e cor para arestas destacadas
-            # Pega os pesos das arestas destacadas para ajustar a espessura
-            if edges_highlight:
-                weights_highlight = [e[2].get('weight', 1) for e in edges_highlight]
-                max_w_highlight = max(weights_highlight) if weights_highlight else 1
-                edge_widths_highlight = [
-                    edge_min_width + (w / max_w_highlight) * (edge_max_width - edge_min_width) * 1.2
-                    for w in weights_highlight
-                ]
-                edge_widths_highlight = [w * edge_scale for w in edge_widths_highlight]
-                edge_widths_highlight = [max(0.5, min(8.0, w)) for w in edge_widths_highlight]
-                edge_colors_highlight = ['#FF6B00'] * len(edges_highlight)  # laranja vibrante
-            else:
-                edge_widths_highlight = []
-                edge_colors_highlight = []
-            
-            # Arestas não destacadas: cor cinza claro e transparentes
-            if edges_other:
-                weights_other = [e[2].get('weight', 1) for e in edges_other]
-                max_w_other = max(weights_other) if weights_other else 1
-                edge_widths_other = [
-                    edge_min_width + (w / max_w_other) * (edge_max_width - edge_min_width) * 0.6
-                    for w in weights_other
-                ]
-                edge_widths_other = [w * edge_scale for w in edge_widths_other]
-                edge_widths_other = [max(0.2, min(4.0, w)) for w in edge_widths_other]
-                edge_colors_other = ['#CCCCCC'] * len(edges_other)
-            else:
-                edge_widths_other = []
-                edge_colors_other = []
-            
-            # --- Construir listas para desenho ---
-            edge_lists = []
-            edge_widths = []
-            edge_colors = []
-            
-            # Adiciona arestas destacadas primeiro (para ficarem por cima)
-            for i, (u, v, data) in enumerate(edges_highlight):
-                edge_lists.append((u, v))
-                edge_widths.append(edge_widths_highlight[i])
-                edge_colors.append(edge_colors_highlight[i])
-            
-            # Adiciona arestas não destacadas
-            for i, (u, v, data) in enumerate(edges_other):
-                edge_lists.append((u, v))
-                edge_widths.append(edge_widths_other[i])
-                edge_colors.append(edge_colors_other[i])
         else:
-            edge_lists = []
-            edge_widths = []
-            edge_colors = []
+            edges_highlight = []
+            edges_other = edges_sorted
+
+        # Prepara listas para desenho
+        edge_lists_highlight = []
+        edge_widths_highlight = []
+        edge_colors_highlight = []
+
+        edge_lists_other = []
+        edge_widths_other = []
+        edge_colors_other = []
+
+        # --- Arestas destacadas com gradiente de cores ---
+        if edges_highlight:
+            weights_h = [e[2].get('weight', 1) for e in edges_highlight]
+            max_h = max(weights_h) if weights_h else 1
+            min_h = min(weights_h) if weights_h else 0
+            range_h = max_h - min_h if max_h != min_h else 1
+
+            for u, v, data in edges_highlight:
+                w = data.get('weight', 1)
+                # Normaliza o peso para [0,1]
+                norm = (w - min_h) / range_h if range_h > 0 else 0.5
+                
+                if use_edge_color_gradient:
+                    # Usa colormap 'Reds' para destacar força
+                    cmap = plt.cm.Reds
+                    color = cmap(0.3 + 0.7 * norm)  # varia de 0.3 a 1.0
+                else:
+                    color = '#FF6B00'  # laranja fixo
+                
+                edge_lists_highlight.append((u, v))
+                width = (edge_min_width + (w / max_h) * (edge_max_width - edge_min_width)) * edge_scale
+                edge_widths_highlight.append(max(0.5, min(8.0, width)))
+                edge_colors_highlight.append(color)
+
+        # --- Arestas não destacadas (cinza claro) ---
+        if edges_other:
+            weights_o = [e[2].get('weight', 1) for e in edges_other]
+            max_o = max(weights_o) if weights_o else 1
+            for u, v, data in edges_other:
+                w = data.get('weight', 1)
+                edge_lists_other.append((u, v))
+                width = (edge_min_width + (w / max_o) * (edge_max_width - edge_min_width) * 0.5) * edge_scale
+                edge_widths_other.append(max(0.2, min(4.0, width)))
+                edge_colors_other.append('#DDDDDD')
 
         # --- Layout ---
         if layout_type == 'spring':
@@ -212,31 +217,30 @@ def display_graph(
         ax.set_facecolor('#FAFAFA')
         fig.patch.set_facecolor('#FAFAFA')
 
-        # --- Desenha arestas (primeiro as não destacadas, depois as destacadas) ---
-        # Desenha arestas não destacadas
-        if edges_other:
+        # Desenha arestas não destacadas (cinza)
+        if edge_lists_other:
             nx.draw_networkx_edges(
                 G_filtered, pos, ax=ax,
-                edgelist=[(u, v) for u, v in edge_lists[len(edges_highlight):]],
-                alpha=0.3, width=edge_widths_other, edge_color='#CCCCCC'
-            )
-        
-        # Desenha arestas destacadas (por cima, com cor vibrante)
-        if edges_highlight:
-            nx.draw_networkx_edges(
-                G_filtered, pos, ax=ax,
-                edgelist=[(u, v) for u, v in edge_lists[:len(edges_highlight)]],
-                alpha=0.9, width=edge_widths_highlight, edge_color='#FF6B00'
+                edgelist=edge_lists_other,
+                alpha=0.3, width=edge_widths_other, edge_color=edge_colors_other
             )
 
-        # --- Desenha nós ---
+        # Desenha arestas destacadas (com gradiente de cores)
+        if edge_lists_highlight:
+            nx.draw_networkx_edges(
+                G_filtered, pos, ax=ax,
+                edgelist=edge_lists_highlight,
+                alpha=0.9, width=edge_widths_highlight, edge_color=edge_colors_highlight
+            )
+
+        # Desenha nós
         nx.draw_networkx_nodes(
             G_filtered, pos, ax=ax,
             node_size=sizes, node_color=colors, alpha=0.85,
             edgecolors='#333333', linewidths=0.8
         )
 
-        # --- Rótulos com halo ---
+        # Rótulos com halo
         if show_labels:
             for node, (x, y) in pos.items():
                 label = labels.get(node, '')
@@ -250,7 +254,7 @@ def display_graph(
                 font_color='#222222'
             )
 
-        # --- Título e legenda ---
+        # Título
         ax.set_title(
             f"{title} (top {displayed_nodes} nós • {G_filtered.number_of_edges()} arestas)",
             fontsize=font_size + 6,
@@ -260,15 +264,14 @@ def display_graph(
         ax.axis('off')
         plt.tight_layout(pad=2.0)
 
-        # --- Exibe ---
         st.pyplot(fig)
         plt.close(fig)
 
-        # --- Legenda com informações sobre destaque ---
+        # Legenda informativa
         if top_edges_to_highlight > 0 and edges_highlight:
             st.caption(
-                f"📌 Estático | Nós: {node_metric} | Escala: {node_scale:.1f}x | "
-                f"Arestas destacadas: {len(edges_highlight)} (laranja) | Demais: cinza"
+                f"📌 {len(edges_highlight)} arestas mais fortes destacadas (gradiente de cores). "
+                f"Demais arestas em cinza."
             )
         else:
             st.caption(

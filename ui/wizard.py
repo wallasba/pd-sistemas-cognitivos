@@ -359,7 +359,8 @@ def render_wizard():
                             layout_iterations=layout_iterations if layout_type == 'spring' else 100,
                             show_labels=show_labels,
                             label_trim=label_trim,
-                            top_edges_to_highlight=top_edges_to_highlight  # <-- NOVO
+                            top_edges_to_highlight=top_edges_to_highlight,  # <-- NOVO
+                            use_edge_color_gradient=True                    # <-- NOVO
                         )
             
             # ============================================================
