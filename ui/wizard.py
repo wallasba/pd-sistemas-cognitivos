@@ -245,6 +245,13 @@ def render_wizard():
                 with st.expander("⚙️ Parâmetros do grafo"):
                     top_n = st.slider("Nº máximo de nós", 10, 100, 40, step=5, key="top_n_graph")
                     min_weight = st.slider("Peso mínimo da aresta", 1, 10, 2, step=1, key="min_weight_graph")
+
+                    top_edges_to_highlight = st.slider(
+                        "Nº de arestas mais fortes para destacar",
+                        min_value=0, max_value=50, value=10, step=1,
+                        key="top_edges_highlight",
+                        help="Destaca as arestas com maior peso (co-ocorrência)."
+                        )                   
                     if graph_type == "Coautoria":
                         min_coauthors = st.slider("Mínimo de coautores", 2, 5, 2, key="min_coauthors_graph")
                     elif graph_type == "Co-ocorrência de Termos":
@@ -332,6 +339,7 @@ def render_wizard():
                         st.warning("Grafo vazio. Tente ajustar os parâmetros.")
                     else:
                         st.session_state['color_community'] = True
+                        
                         display_graph(
                             G, graph_type, "custom",
                             top_n=top_n,
@@ -350,7 +358,8 @@ def render_wizard():
                             layout_k=layout_k if layout_type == 'spring' else 0.3,
                             layout_iterations=layout_iterations if layout_type == 'spring' else 100,
                             show_labels=show_labels,
-                            label_trim=label_trim
+                            label_trim=label_trim,
+                            top_edges_to_highlight=top_edges_to_highlight  # <-- NOVO
                         )
             
             # ============================================================
