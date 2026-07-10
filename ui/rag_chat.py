@@ -12,26 +12,25 @@ def render_rag_chat(df):
         st.info("Carregue um corpus para usar o chat RAG.")
         return
 
+    # Verifica se a chave está disponível no session_state ou ambiente
+    groq_api_key = st.session_state.get("groq_api_key") or os.getenv("GROQ_API_KEY")
+    if not groq_api_key:
+        st.warning("⚠️ Chave da API Groq não encontrada. Configure-a na barra lateral.")
+        return
+
     if st.session_state.rag_pipeline is None:
         with st.spinner("Carregando pipeline RAG (embeddings + Groq)..."):
             temp_csv = tempfile.NamedTemporaryFile(suffix=".csv", delete=False)
             df[['title', 'abstract_clean', 'source', 'year']].to_csv(temp_csv.name, index=False)
             temp_csv.close()
             try:
-                # Pega a chave da variável de ambiente ou solicita no UI
-                groq_api_key = os.getenv("GROQ_API_KEY")
-                if not groq_api_key:
-                    groq_api_key = st.text_input("Digite sua chave da API Groq:", type="password")
-                    if not groq_api_key:
-                        st.stop()
-
                 st.session_state.rag_pipeline = RAGPipeline(
                     corpus_path=temp_csv.name,
                     text_column='abstract_clean',
                     embedding_model_name="all-MiniLM-L6-v2",
                     k_retrieval=10,
                     groq_api_key=groq_api_key,
-                    api_model="llama-3.1-8b-instant",  # Modelo rápido. Opções: "llama-3.3-70b-versatile", "mixtral-8x7b-32768", "gemma2-9b-it"
+                    api_model="llama-3.1-8b-instant",  # ou "llama-3.3-70b-versatile"
                     response_language="português"
                 )
                 st.success("Pipeline RAG carregado (Groq)!")
@@ -41,7 +40,7 @@ def render_rag_chat(df):
                 st.error(f"Erro: {e}")
                 return
 
-    # Perguntas de exemplo
+    # Perguntas de exemplo (mantido)
     question_masks = [
         "Quais são os desafios éticos mencionados nos artigos?",
         "Quais as tendências recentes (2026) em IA?",

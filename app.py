@@ -5,6 +5,9 @@ import os
 from dotenv import load_dotenv
 load_dotenv()
 
+if 'groq_api_key' not in st.session_state:
+    st.session_state.groq_api_key = os.getenv("GROQ_API_KEY", "")
+
 # ============================================================
 # CONFIGURAÇÃO DA PÁGINA
 # ============================================================

@@ -197,6 +197,15 @@ def render_wizard():
         
         if st.session_state.df is not None:
             df = st.session_state.df
+
+            # ============================================================
+            # PRÉ-VISUALIZAÇÃO DO CORPUS (AGORA NA PÁGINA PRINCIPAL)
+            # ============================================================
+            st.subheader("📄 Pré-visualização do Corpus")
+            with st.expander("Ver primeiras 10 linhas do corpus carregado", expanded=False):
+                st.dataframe(df[['title', 'source', 'year', 'abstract']].head(10))
+                st.caption(f"Total de artigos: {len(df)}")
+            st.divider()
             
             # Análises descritivas (mantido)
             render_analysis(df)
