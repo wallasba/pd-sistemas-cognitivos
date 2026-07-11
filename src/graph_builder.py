@@ -246,3 +246,124 @@ def prepare_node_attributes(G, metric='degree', community_detection=True):
             G.nodes[node]['color'] = '#4A90D9'
     
     return G
+
+def compute_network_statistics(G: nx.Graph) -> dict:
+    """
+    Calcula estatísticas completas da rede para análise científica.
+    Retorna um dicionário com todas as métricas.
+    """
+    stats = {}
+    
+    # Métricas básicas
+    stats['nodes'] = G.number_of_nodes()
+    stats['edges'] = G.number_of_edges()
+    stats['density'] = nx.density(G)
+    stats['is_connected'] = nx.is_connected(G)
+    
+    # Componentes
+    if not nx.is_connected(G):
+        stats['num_components'] = nx.number_connected_components(G)
+        components = list(nx.connected_components(G))
+        stats['largest_component_size'] = max(len(c) for c in components)
+        stats['component_sizes'] = [len(c) for c in components]
+    else:
+        stats['num_components'] = 1
+        stats['largest_component_size'] = G.number_of_nodes()
+        stats['component_sizes'] = [G.number_of_nodes()]
+    
+    # Transitividade (clustering)
+    stats['transitivity'] = nx.transitivity(G)
+    stats['average_clustering'] = nx.average_clustering(G)
+    
+    # Diâmetro e raio (apenas se conectado)
+    if nx.is_connected(G):
+        try:
+            stats['diameter'] = nx.diameter(G)
+            stats['radius'] = nx.radius(G)
+            stats['average_shortest_path'] = nx.average_shortest_path_length(G)
+        except:
+            stats['diameter'] = None
+            stats['radius'] = None
+            stats['average_shortest_path'] = None
+    else:
+        stats['diameter'] = None
+        stats['radius'] = None
+        stats['average_shortest_path'] = None
+    
+    # Centralidades (nós mais importantes)
+    try:
+        degree_cent = nx.degree_centrality(G)
+        betweenness_cent = nx.betweenness_centrality(G)
+        closeness_cent = nx.closeness_centrality(G)
+        eigenvector_cent = nx.eigenvector_centrality(G, max_iter=1000)
+    except:
+        degree_cent = {}
+        betweenness_cent = {}
+        closeness_cent = {}
+        eigenvector_cent = {}
+    
+    # Top 5 nós por cada centralidade
+    stats['top_degree'] = sorted(degree_cent.items(), key=lambda x: x[1], reverse=True)[:5]
+    stats['top_betweenness'] = sorted(betweenness_cent.items(), key=lambda x: x[1], reverse=True)[:5]
+    stats['top_closeness'] = sorted(closeness_cent.items(), key=lambda x: x[1], reverse=True)[:5]
+    stats['top_eigenvector'] = sorted(eigenvector_cent.items(), key=lambda x: x[1], reverse=True)[:5]
+    
+    # Resumo dos valores de centralidade
+    if degree_cent:
+        stats['degree_mean'] = np.mean(list(degree_cent.values()))
+        stats['degree_max'] = max(degree_cent.values())
+        stats['degree_min'] = min(degree_cent.values())
+    
+    # Assortatividade (se houver arestas)
+    if G.number_of_edges() > 0:
+        try:
+            stats['assortativity'] = nx.degree_assortativity_coefficient(G)
+        except:
+            stats['assortativity'] = None
+    else:
+        stats['assortativity'] = None
+    
+    return stats
+
+def stats_to_dataframe(stats: dict) -> pd.DataFrame:
+    """Converte estatísticas em DataFrame para exportação."""
+    rows = []
+    
+    # Métricas gerais
+    rows.append({'Metric': 'Número de nós', 'Value': stats.get('nodes', 0)})
+    rows.append({'Metric': 'Número de arestas', 'Value': stats.get('edges', 0)})
+    rows.append({'Metric': 'Densidade', 'Value': f"{stats.get('density', 0):.4f}"})
+    rows.append({'Metric': 'Conectado', 'Value': stats.get('is_connected', False)})
+    rows.append({'Metric': 'Componentes', 'Value': stats.get('num_components', 0)})
+    rows.append({'Metric': 'Maior componente', 'Value': stats.get('largest_component_size', 0)})
+    rows.append({'Metric': 'Transitividade', 'Value': f"{stats.get('transitivity', 0):.4f}"})
+    rows.append({'Metric': 'Clustering médio', 'Value': f"{stats.get('average_clustering', 0):.4f}"})
+    
+    if stats.get('diameter'):
+        rows.append({'Metric': 'Diâmetro', 'Value': stats['diameter']})
+        rows.append({'Metric': 'Raio', 'Value': stats['radius']})
+        rows.append({'Metric': 'Distância média', 'Value': f"{stats['average_shortest_path']:.3f}"})
+    
+    if 'degree_mean' in stats:
+        rows.append({'Metric': 'Grau médio', 'Value': f"{stats['degree_mean']:.3f}"})
+        rows.append({'Metric': 'Grau máximo', 'Value': f"{stats['degree_max']:.3f}"})
+        rows.append({'Metric': 'Grau mínimo', 'Value': f"{stats['degree_min']:.3f}"})
+    
+    if stats.get('assortativity'):
+        rows.append({'Metric': 'Assortatividade', 'Value': f"{stats['assortativity']:.3f}"})
+    
+    # Top nós por centralidade
+    for label, top_list in [
+        ('Top grau', stats.get('top_degree', [])),
+        ('Top betweenness', stats.get('top_betweenness', [])),
+        ('Top closeness', stats.get('top_closeness', [])),
+        ('Top eigenvector', stats.get('top_eigenvector', []))
+    ]:
+        if top_list:
+            rows.append({'Metric': f"{label} (1º)", 'Value': f"{top_list[0][0]} ({top_list[0][1]:.4f})"})
+            if len(top_list) > 1:
+                rows.append({'Metric': f"{label} (2º)", 'Value': f"{top_list[1][0]} ({top_list[1][1]:.4f})"})
+            if len(top_list) > 2:
+                rows.append({'Metric': f"{label} (3º)", 'Value': f"{top_list[2][0]} ({top_list[2][1]:.4f})"})
+    
+    return pd.DataFrame(rows)

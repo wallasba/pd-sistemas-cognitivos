@@ -188,204 +188,235 @@ def render_wizard():
                             st.session_state.step = 4
                             st.rerun()
     
-    # ============================================================
-    # ETAPA 4: Análise
-    # ============================================================
-    elif st.session_state.step == 4:
-        st.header("4️⃣ Análise Exploratória e Refinamento")
-        st.markdown("Explore os resultados da sua coleta. Use os grafos e estatísticas para refinar sua pesquisa.")
-        
-        if st.session_state.df is not None:
-            df = st.session_state.df
-            
-            # ============================================================
-            # PRÉ-VISUALIZAÇÃO DO CORPUS
-            # ============================================================
-            st.subheader("📄 Pré-visualização do Corpus")
-            with st.expander("Ver primeiras 10 linhas do corpus carregado", expanded=False):
-                st.dataframe(df[['title', 'source', 'year', 'abstract']].head(10))
-                st.caption(f"Total de artigos: {len(df)}")
-            st.divider()
-            
-            # Análises descritivas
-            render_analysis(df)
-            
-            # ============================================================
-            # GRAFOS – APENAS ESTÁTICO
-            # ============================================================
-            st.subheader("🕸️ Análise de Redes Científicas")
-            
-            col_grafo_tipo, col_grafo_params = st.columns([1, 2])
-            
-            with col_grafo_tipo:
-                graph_type = st.selectbox(
-                    "Tipo de grafo:",
-                    [
-                        "Coautoria",
-                        "Colaboração entre Instituições",
-                        "Termos × Instituições",
-                        "Co-ocorrência de Termos",
-                        "Cocitação (proxy - autores)",
-                        "Acoplamento (proxy - similaridade de artigos)"
-                    ],
-                    key="graph_type_selector"
-                )
-                
-                filter_criterion = st.selectbox(
-                    "Critério para selecionar os nós:",
-                    ["degree", "frequency", "betweenness"],
-                    format_func=lambda x: {
-                        "degree": "Grau (mais conectados)",
-                        "frequency": "Frequência (mais produtivos)",
-                        "betweenness": "Centralidade (pontes)"
-                    }[x],
-                    key="filter_criterion_selector"
-                )
-                
-                with st.expander("⚙️ Parâmetros do grafo"):
-                    top_n = st.slider("Nº máximo de nós", 10, 100, 40, step=5, key="top_n_graph")
-                    min_weight = st.slider("Peso mínimo da aresta", 1, 10, 2, step=1, key="min_weight_graph")
+    # ui/wizard.py – ETAPA 4 (substitua toda a seção de grafos)
 
-                    top_edges_to_highlight = st.slider(
-                        "Nº de arestas mais fortes para destacar",
-                        min_value=0, max_value=50, value=10, step=1,
-                        key="top_edges_highlight",
-                        help="Destaca as arestas com maior peso (co-ocorrência)."
-                        )                   
-                    if graph_type == "Coautoria":
-                        min_coauthors = st.slider("Mínimo de coautores", 2, 5, 2, key="min_coauthors_graph")
-                    elif graph_type == "Co-ocorrência de Termos":
-                        top_terms = st.slider("Nº de termos", 20, 100, 50, step=5, key="top_terms_graph")
-            
-            with col_grafo_params:
-                st.markdown("**🎨 Ajustes de Visualização**")
-                
-                col_a, col_b = st.columns(2)
-                with col_a:
-                    node_metric = st.selectbox(
-                        "Tamanho do nó baseado em:",
-                        ["degree", "betweenness", "closeness", "frequency", "uniform"],
-                        format_func=lambda x: {
-                            "degree": "Grau (conexões)",
-                            "betweenness": "Betweenness (centralidade)",
-                            "closeness": "Closeness (proximidade)",
-                            "frequency": "Frequência (produtividade)",
-                            "uniform": "Uniforme (fixo)"
-                        }[x],
-                        key="node_metric_vis"
-                    )
-                    node_scale = st.slider(
-                        "Multiplicador de tamanho dos nós", 
-                        0.5, 3.0, 1.0, 0.1, 
-                        key="node_scale_vis"
-                    )
-                    node_min_size = st.slider("Tamanho mínimo do nó", 5, 30, 10, key="node_min_vis")
-                    node_max_size = st.slider("Tamanho máximo do nó", 30, 120, 80, key="node_max_vis")
-                
-                with col_b:
-                    edge_scale = st.slider(
-                        "Multiplicador de espessura das arestas", 
-                        0.5, 3.0, 1.0, 0.1,
-                        key="edge_scale_vis"
-                    )
-                    edge_min_width = st.slider("Largura mínima da aresta", 0.2, 2.0, 0.5, 0.1, key="edge_min_vis")
-                    edge_max_width = st.slider("Largura máxima da aresta", 2.0, 8.0, 5.0, 0.5, key="edge_max_vis")
-                
-                col_c, col_d = st.columns(2)
-                with col_c:
-                    layout_type = st.selectbox(
-                        "Layout do grafo:",
-                        ["spring", "circular", "kamada_kawai", "shell"],
-                        format_func=lambda x: {
-                            "spring": "Spring (elástico)",
-                            "circular": "Circular",
-                            "kamada_kawai": "Kamada-Kawai",
-                            "shell": "Shell (camadas)"
-                        }[x],
-                        key="layout_vis"
-                    )
-                    if layout_type == "spring":
-                        layout_k = st.slider("K (distância entre nós)", 0.1, 1.0, 0.3, 0.05, key="layout_k_vis")
-                        layout_iterations = st.slider("Iterações", 50, 500, 100, 50, key="layout_iter_vis")
-                    else:
-                        layout_k = 0.3
-                        layout_iterations = 100
-                
-                with col_d:
-                    font_size = st.slider("Tamanho da fonte dos rótulos", 6, 20, 10, key="font_vis")
-                    fig_width = st.slider("Largura da figura (pol)", 8, 20, 14, key="fig_width_vis")
-                    fig_height = st.slider("Altura da figura (pol)", 6, 16, 10, key="fig_height_vis")
-                    show_labels = st.checkbox("Exibir rótulos", value=True, key="show_labels_vis")
-                    label_trim = st.slider("Truncar rótulos com >", 10, 40, 25, key="label_trim_vis")
-            
-            # Botão gerar grafo
-            if st.button("📊 Gerar Grafo", type="primary", key="gerar_grafo_button"):
-                with st.spinner(f"Construindo grafo de {graph_type}..."):
-                    G = None
-                    if graph_type == "Coautoria":
-                        G = build_coauthorship_graph(df, min_coauthors=min_coauthors)
-                    elif graph_type == "Colaboração entre Instituições":
-                        G = build_institution_collaboration_graph(df)
-                    elif graph_type == "Termos × Instituições":
-                        G = build_term_institution_graph(df, top_terms=top_n)
-                    elif graph_type == "Co-ocorrência de Termos":
-                        G = build_term_cooccurrence_graph(df, top_terms=top_terms, min_cooccurrence=min_weight)
-                    elif graph_type == "Cocitação (proxy - autores)":
-                        G = build_author_citation_proxy_graph(df, top_authors=top_n)
-                    elif graph_type == "Acoplamento (proxy - similaridade de artigos)":
-                        G = build_article_similarity_graph(df, top_n=top_n, threshold=min_weight/10)
-                    
-                    if G is None or G.number_of_nodes() == 0:
-                        st.warning("Grafo vazio. Tente ajustar os parâmetros.")
-                    else:
-                        st.session_state['color_community'] = True
-                        
-                        display_graph(
-                            G, graph_type, "custom",
-                            top_n=top_n,
-                            filter_criterion=filter_criterion,
-                            node_metric=node_metric,
-                            node_scale=node_scale,
-                            node_min_size=node_min_size,
-                            node_max_size=node_max_size,
-                            edge_scale=edge_scale,
-                            edge_min_width=edge_min_width,
-                            edge_max_width=edge_max_width,
-                            font_size=font_size,
-                            fig_width=fig_width,
-                            fig_height=fig_height,
-                            layout_type=layout_type,
-                            layout_k=layout_k if layout_type == 'spring' else 0.3,
-                            layout_iterations=layout_iterations if layout_type == 'spring' else 100,
-                            show_labels=show_labels,
-                            label_trim=label_trim,
-                            top_edges_to_highlight=top_edges_to_highlight,  # <-- NOVO
-                            use_edge_color_gradient=True                    # <-- NOVO
-                        )
-            
-            # ============================================================
-            # RECOMENDAÇÕES
-            # ============================================================
-            st.subheader("💡 Recomendações para Refinamento")
-            top_keywords = extract_keywords(df, top_n=10)
-            if top_keywords:
-                st.markdown("**Termos mais frequentes no corpus:** " + ", ".join(top_keywords))
-                st.markdown("**Sugestão:** Considere adicionar ou remover termos na query para refinar o escopo.")
-            
-            # ============================================================
-            # NAVEGAÇÃO
-            # ============================================================
-            col_prev, col_next = st.columns(2)
-            with col_prev:
-                if st.button("← Voltar para Estratégia"):
-                    st.session_state.step = 3
-                    st.rerun()
-            with col_next:
-                if st.button("✅ Concluir e Ir para o Resumo"):
-                    st.session_state.step = 5
-                    st.rerun()
+# ============================================================
+# GRAFOS – COM ATUALIZAÇÃO AUTOMÁTICA E ESTATÍSTICAS
+# ============================================================
+st.subheader("🕸️ Análise de Redes Científicas")
+
+# --- Parâmetros do grafo (armazenados em session_state para auto-atualização) ---
+
+col_grafo_tipo, col_grafo_params = st.columns([1, 2])
+
+with col_grafo_tipo:
+    graph_type = st.selectbox(
+        "Tipo de grafo:",
+        [
+            "Coautoria",
+            "Colaboração entre Instituições",
+            "Termos × Instituições",
+            "Co-ocorrência de Termos",
+            "Cocitação (proxy - autores)",
+            "Acoplamento (proxy - similaridade de artigos)"
+        ],
+        key="graph_type_selector"
+    )
+    
+    filter_criterion = st.selectbox(
+        "Critério para selecionar os nós:",
+        ["degree", "frequency", "betweenness"],
+        format_func=lambda x: {
+            "degree": "Grau (mais conectados)",
+            "frequency": "Frequência (mais produtivos)",
+            "betweenness": "Centralidade (pontes)"
+        }[x],
+        key="filter_criterion_selector"
+    )
+    
+    with st.expander("⚙️ Parâmetros do grafo"):
+        top_n = st.slider("Nº máximo de nós", 10, 100, 40, step=5, key="top_n_graph")
+        min_weight = st.slider("Peso mínimo da aresta", 1, 10, 2, step=1, key="min_weight_graph")
+        top_edges_to_highlight = st.slider(
+            "Nº de arestas mais fortes para destacar",
+            min_value=0, max_value=50, value=10, step=1,
+            key="top_edges_highlight",
+            help="Selecione quantas arestas com maior peso serão destacadas com cores vibrantes."
+        )
+        if graph_type == "Coautoria":
+            min_coauthors = st.slider("Mínimo de coautores", 2, 5, 2, key="min_coauthors_graph")
+        elif graph_type == "Co-ocorrência de Termos":
+            top_terms = st.slider("Nº de termos", 20, 100, 50, step=5, key="top_terms_graph")
+
+with col_grafo_params:
+    st.markdown("**🎨 Ajustes de Visualização**")
+    
+    col_a, col_b = st.columns(2)
+    with col_a:
+        node_metric = st.selectbox(
+            "Tamanho do nó baseado em:",
+            ["degree", "betweenness", "closeness", "frequency", "uniform"],
+            format_func=lambda x: {
+                "degree": "Grau (conexões)",
+                "betweenness": "Betweenness (centralidade)",
+                "closeness": "Closeness (proximidade)",
+                "frequency": "Frequência (produtividade)",
+                "uniform": "Uniforme (fixo)"
+            }[x],
+            key="node_metric_vis"
+        )
+        node_scale = st.slider(
+            "Multiplicador de tamanho dos nós", 
+            0.5, 3.0, 1.0, 0.1, 
+            key="node_scale_vis"
+        )
+        node_min_size = st.slider("Tamanho mínimo do nó", 20, 60, 30, key="node_min_vis")
+        node_max_size = st.slider("Tamanho máximo do nó", 60, 200, 120, key="node_max_vis")
+    
+    with col_b:
+        edge_scale = st.slider(
+            "Multiplicador de espessura das arestas", 
+            0.5, 3.0, 1.0, 0.1,
+            key="edge_scale_vis"
+        )
+        edge_min_width = st.slider("Largura mínima da aresta", 0.2, 2.0, 0.5, 0.1, key="edge_min_vis")
+        edge_max_width = st.slider("Largura máxima da aresta", 2.0, 8.0, 5.0, 0.5, key="edge_max_vis")
+    
+    col_c, col_d = st.columns(2)
+    with col_c:
+        layout_type = st.selectbox(
+            "Layout do grafo:",
+            ["spring", "circular", "kamada_kawai", "shell"],
+            format_func=lambda x: {
+                "spring": "Spring (elástico)",
+                "circular": "Circular",
+                "kamada_kawai": "Kamada-Kawai",
+                "shell": "Shell (camadas)"
+            }[x],
+            key="layout_vis"
+        )
+        if layout_type == "spring":
+            layout_k = st.slider("K (distância entre nós)", 0.1, 1.0, 0.3, 0.05, key="layout_k_vis")
+            layout_iterations = st.slider("Iterações", 50, 500, 100, 50, key="layout_iter_vis")
         else:
-            st.warning("Nenhum corpus coletado. Volte e realize a coleta.")
+            layout_k = 0.3
+            layout_iterations = 100
+    
+    with col_d:
+        font_size = st.slider("Tamanho da fonte dos rótulos", 8, 24, 12, key="font_vis")
+        fig_width = st.slider("Largura da figura (pol)", 10, 24, 16, key="fig_width_vis")
+        fig_height = st.slider("Altura da figura (pol)", 8, 18, 12, key="fig_height_vis")
+        show_labels = st.checkbox("Exibir rótulos", value=True, key="show_labels_vis")
+        label_trim = st.slider("Truncar rótulos com >", 10, 40, 25, key="label_trim_vis")
+
+# ============================================================
+# CONSTRUÇÃO DO GRAFO (AUTOMÁTICA)
+# ============================================================
+
+# Função para construir o grafo com base nos parâmetros atuais
+def build_current_graph():
+    """Constrói o grafo com os parâmetros atuais."""
+    if df is None:
+        return None, None
+    
+    G = None
+    if graph_type == "Coautoria":
+        G = build_coauthorship_graph(df, min_coauthors=min_coauthors)
+    elif graph_type == "Colaboração entre Instituições":
+        G = build_institution_collaboration_graph(df)
+    elif graph_type == "Termos × Instituições":
+        G = build_term_institution_graph(df, top_terms=top_n)
+    elif graph_type == "Co-ocorrência de Termos":
+        G = build_term_cooccurrence_graph(df, top_terms=top_terms, min_cooccurrence=min_weight)
+    elif graph_type == "Cocitação (proxy - autores)":
+        G = build_author_citation_proxy_graph(df, top_authors=top_n)
+    elif graph_type == "Acoplamento (proxy - similaridade de artigos)":
+        G = build_article_similarity_graph(df, top_n=top_n, threshold=min_weight/10)
+    
+    return G, graph_type
+
+# ============================================================
+# EXIBIÇÃO AUTOMÁTICA DO GRAFO
+# ============================================================
+
+# Usamos um placeholder para forçar a atualização sempre que os parâmetros mudarem
+# A chave de cache é baseada em todos os parâmetros relevantes
+cache_key = f"{graph_type}_{filter_criterion}_{top_n}_{min_weight}_{top_edges_to_highlight}_{node_metric}_{node_scale}_{layout_type}"
+
+# Se o grafo não estiver em cache ou os parâmetros mudaram, reconstrói
+if 'cached_graph' not in st.session_state or st.session_state.get('graph_key') != cache_key:
+    G, title = build_current_graph()
+    if G and G.number_of_nodes() > 0:
+        st.session_state.cached_graph = G
+        st.session_state.graph_title = title
+        st.session_state.graph_key = cache_key
+    else:
+        st.session_state.cached_graph = None
+
+# Exibe o grafo se existir
+if st.session_state.get('cached_graph') is not None:
+    G = st.session_state.cached_graph
+    title = st.session_state.graph_title
+    
+    # Aplica atributos visuais
+    st.session_state['color_community'] = True
+    display_graph(
+        G, title, "custom",
+        top_n=top_n,
+        filter_criterion=filter_criterion,
+        node_metric=node_metric,
+        node_scale=node_scale,
+        node_min_size=node_min_size,
+        node_max_size=node_max_size,
+        edge_scale=edge_scale,
+        edge_min_width=edge_min_width,
+        edge_max_width=edge_max_width,
+        font_size=font_size,
+        fig_width=fig_width,
+        fig_height=fig_height,
+        layout_type=layout_type,
+        layout_k=layout_k if layout_type == 'spring' else 0.3,
+        layout_iterations=layout_iterations if layout_type == 'spring' else 100,
+        show_labels=show_labels,
+        label_trim=label_trim,
+        top_edges_to_highlight=top_edges_to_highlight,
+        use_edge_color_gradient=True
+    )
+    
+    # ============================================================
+    # ESTATÍSTICAS DA REDE (com exportação)
+    # ============================================================
+    st.subheader("📊 Estatísticas da Rede")
+    
+    # Botão para gerar estatísticas
+    if st.button("📈 Gerar Estatísticas da Rede", key="generate_stats"):
+        with st.spinner("Calculando estatísticas..."):
+            stats = compute_network_statistics(G)
+            st.session_state.network_stats = stats
+            st.success("Estatísticas calculadas!")
+    
+    # Exibe estatísticas se disponíveis
+    if 'network_stats' in st.session_state and st.session_state.network_stats:
+        stats = st.session_state.network_stats
+        df_stats = stats_to_dataframe(stats)
+        
+        # Exibe tabela
+        st.dataframe(df_stats, use_container_width=True)
+        
+        # Botão de exportação
+        col_exp1, col_exp2 = st.columns(2)
+        with col_exp1:
+            csv = df_stats.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="📥 Baixar CSV",
+                data=csv,
+                file_name="network_statistics.csv",
+                mime="text/csv"
+            )
+        with col_exp2:
+            from io import BytesIO
+            output = BytesIO()
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                df_stats.to_excel(writer, index=False, sheet_name='Network Stats')
+            excel_data = output.getvalue()
+            st.download_button(
+                label="📥 Baixar Excel",
+                data=excel_data,
+                file_name="network_statistics.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+else:
+    st.info("ℹ️ Ajuste os parâmetros acima para gerar um grafo. O grafo será atualizado automaticamente.")
     
     # ============================================================
     # ETAPA 5: Resumo
