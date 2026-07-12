@@ -1,6 +1,6 @@
 # ui/wizard.py
 # ============================================================
-# VERSÃO COMPLETA E CORRIGIDA
+# VERSÃO COMPLETA – ASSISTENTE DE PESQUISA (5 ETAPAS)
 # ============================================================
 
 import streamlit as st
@@ -14,12 +14,13 @@ from src.graph_builder import (
     build_term_institution_graph,
     build_term_cooccurrence_graph,
     build_author_citation_proxy_graph,
-    build_article_similarity_graph
+    build_article_similarity_graph,
+    compute_network_statistics,
+    stats_to_dataframe
 )
 from .analysis import render_analysis
 from .graph_viewer import display_graph, prepare_node_attributes
 from .rag_chat import render_rag_chat
-from src.graph_builder import compute_network_statistics, stats_to_dataframe
 
 def render_wizard():
     """Renderiza o wizard de 5 etapas."""
@@ -30,6 +31,13 @@ def render_wizard():
     if st.session_state.step == 1:
         st.header("1️⃣ Defina seu problema de pesquisa")
         st.markdown("Descreva livremente o tema, a área e as principais questões que você deseja investigar.")
+        
+        # Se já houver corpus, oferece pular
+        if st.session_state.df is not None and not st.session_state.df.empty:
+            if st.button("📊 Ir direto para Análise", type="primary"):
+                st.session_state.step = 4
+                st.rerun()
+            st.markdown("---")
         
         context = st.text_area(
             "Qual é o seu tema/problema de pesquisa?",
@@ -60,6 +68,13 @@ def render_wizard():
     elif st.session_state.step == 2:
         st.header("2️⃣ Objetivos e Hipóteses")
         st.markdown("Com base no contexto, defina os objetivos e hipóteses da sua pesquisa.")
+        
+        # Se já houver corpus, oferece pular
+        if st.session_state.df is not None and not st.session_state.df.empty:
+            if st.button("📊 Ir direto para Análise", type="primary"):
+                st.session_state.step = 4
+                st.rerun()
+            st.markdown("---")
         
         df_for_recommend = st.session_state.df
         
@@ -121,6 +136,7 @@ def render_wizard():
         st.header("3️⃣ Estratégia de Busca Bibliográfica")
         st.markdown("Construa sua query de busca com operadores booleanos e defina os parâmetros de coleta.")
         
+        # Se já houver corpus, sugere pular
         if st.session_state.df is not None and not st.session_state.df.empty:
             st.info("ℹ️ Você já possui um corpus carregado. Pode prosseguir diretamente para a análise.")
             if st.button("📊 Ir para Análise", type="primary"):
@@ -215,11 +231,9 @@ def render_wizard():
             # GRAFOS – COM ATUALIZAÇÃO AUTOMÁTICA E ESTATÍSTICAS
             # ============================================================
             st.subheader("🕸️ Análise de Redes Científicas")
-
-            # --- Parâmetros do grafo (armazenados em session_state para auto-atualização) ---
-
+            
             col_grafo_tipo, col_grafo_params = st.columns([1, 2])
-
+            
             with col_grafo_tipo:
                 graph_type = st.selectbox(
                     "Tipo de grafo:",
@@ -258,7 +272,7 @@ def render_wizard():
                         min_coauthors = st.slider("Mínimo de coautores", 2, 5, 2, key="min_coauthors_graph")
                     elif graph_type == "Co-ocorrência de Termos":
                         top_terms = st.slider("Nº de termos", 20, 100, 50, step=5, key="top_terms_graph")
-
+            
             with col_grafo_params:
                 st.markdown("**🎨 Ajustes de Visualização**")
                 
@@ -319,12 +333,11 @@ def render_wizard():
                     fig_height = st.slider("Altura da figura (pol)", 8, 18, 12, key="fig_height_vis")
                     show_labels = st.checkbox("Exibir rótulos", value=True, key="show_labels_vis")
                     label_trim = st.slider("Truncar rótulos com >", 10, 40, 25, key="label_trim_vis")
-
+            
             # ============================================================
             # CONSTRUÇÃO DO GRAFO (AUTOMÁTICA)
             # ============================================================
-
-            # Função para construir o grafo com base nos parâmetros atuais
+            
             def build_current_graph():
                 """Constrói o grafo com os parâmetros atuais."""
                 if df is None:
@@ -345,15 +358,11 @@ def render_wizard():
                     G = build_article_similarity_graph(df, top_n=top_n, threshold=min_weight/10)
                 
                 return G, graph_type
-
-            # ============================================================
-            # EXIBIÇÃO AUTOMÁTICA DO GRAFO
-            # ============================================================
-
-            # Usamos uma chave de cache baseada em todos os parâmetros relevantes
+            
+            # Chave de cache baseada em todos os parâmetros
             cache_key = f"{graph_type}_{filter_criterion}_{top_n}_{min_weight}_{top_edges_to_highlight}_{node_metric}_{node_scale}_{layout_type}"
-
-            # Se o grafo não estiver em cache ou os parâmetros mudaram, reconstrói
+            
+            # Reconstrói se os parâmetros mudarem
             if 'cached_graph' not in st.session_state or st.session_state.get('graph_key') != cache_key:
                 G, title = build_current_graph()
                 if G and G.number_of_nodes() > 0:
@@ -362,13 +371,12 @@ def render_wizard():
                     st.session_state.graph_key = cache_key
                 else:
                     st.session_state.cached_graph = None
-
+            
             # Exibe o grafo se existir
             if st.session_state.get('cached_graph') is not None:
                 G = st.session_state.cached_graph
                 title = st.session_state.graph_title
                 
-                # Aplica atributos visuais
                 st.session_state['color_community'] = True
                 display_graph(
                     G, title, "custom",
@@ -398,22 +406,18 @@ def render_wizard():
                 # ============================================================
                 st.subheader("📊 Estatísticas da Rede")
                 
-                # Botão para gerar estatísticas
                 if st.button("📈 Gerar Estatísticas da Rede", key="generate_stats"):
                     with st.spinner("Calculando estatísticas..."):
                         stats = compute_network_statistics(G)
                         st.session_state.network_stats = stats
                         st.success("Estatísticas calculadas!")
                 
-                # Exibe estatísticas se disponíveis
                 if 'network_stats' in st.session_state and st.session_state.network_stats:
                     stats = st.session_state.network_stats
                     df_stats = stats_to_dataframe(stats)
                     
-                    # Exibe tabela
                     st.dataframe(df_stats, use_container_width=True)
                     
-                    # Botão de exportação
                     col_exp1, col_exp2 = st.columns(2)
                     with col_exp1:
                         csv = df_stats.to_csv(index=False).encode('utf-8')
@@ -437,47 +441,90 @@ def render_wizard():
                         )
             else:
                 st.info("ℹ️ Ajuste os parâmetros acima para gerar um grafo. O grafo será atualizado automaticamente.")
+            
+            # ============================================================
+            # RECOMENDAÇÕES
+            # ============================================================
+            st.subheader("💡 Recomendações para Refinamento")
+            top_keywords = extract_keywords(df, top_n=10)
+            if top_keywords:
+                st.markdown("**Termos mais frequentes no corpus:** " + ", ".join(top_keywords))
+                st.markdown("**Sugestão:** Considere adicionar ou remover termos na query para refinar o escopo.")
+            
+            # ============================================================
+            # BOTÃO PARA IR DIRETO AO CHAT RAG
+            # ============================================================
+            st.markdown("---")
+            col_chat1, col_chat2 = st.columns([1, 3])
+            with col_chat1:
+                if st.button("💬 Ir para o Chat RAG", type="primary", use_container_width=True):
+                    st.session_state.step = 5
+                    st.rerun()
+            with col_chat2:
+                st.caption("Pule as etapas e vá direto para o assistente de perguntas e respostas sobre o corpus.")
+            
+            # ============================================================
+            # NAVEGAÇÃO
+            # ============================================================
+            col_prev, col_next = st.columns(2)
+            with col_prev:
+                if st.button("← Voltar para Estratégia"):
+                    st.session_state.step = 3
+                    st.rerun()
+            with col_next:
+                if st.button("✅ Concluir e Ir para o Resumo"):
+                    st.session_state.step = 5
+                    st.rerun()
+        else:
+            st.warning("Nenhum corpus coletado. Volte e realize a coleta.")
     
     # ============================================================
-    # ETAPA 5: Resumo
+    # ETAPA 5: Resumo e Chat RAG
     # ============================================================
     elif st.session_state.step == 5:
         st.header("5️⃣ Resumo da Pesquisa e Próximos Passos")
         st.markdown("Parabéns! Você completou o ciclo de pesquisa assistida.")
         
+        # ============================================================
+        # CHAT RAG (exibido logo no início da etapa 5)
+        # ============================================================
+        render_rag_chat(st.session_state.df)
+        
+        st.markdown("---")
+        
+        # ============================================================
+        # RESUMO DA PESQUISA
+        # ============================================================
         if st.session_state.research_context:
-            st.subheader("Problema de Pesquisa")
+            st.subheader("📌 Problema de Pesquisa")
             st.write(st.session_state.research_context)
         
         if st.session_state.objectives:
-            st.subheader("Objetivos")
+            st.subheader("🎯 Objetivos")
             for obj in st.session_state.objectives:
                 st.write(f"- {obj}")
         
         if st.session_state.hypotheses:
-            st.subheader("Hipóteses")
+            st.subheader("🧪 Hipóteses")
             for hyp in st.session_state.hypotheses:
                 st.write(f"- {hyp}")
         
         if st.session_state.query:
-            st.subheader("Query de Busca Utilizada")
+            st.subheader("🔍 Query de Busca Utilizada")
             st.code(st.session_state.query)
         
         if st.session_state.df is not None:
-            st.subheader(f"Corpus Coletado ({len(st.session_state.df)} artigos)")
+            st.subheader(f"📚 Corpus Coletado ({len(st.session_state.df)} artigos)")
             st.dataframe(st.session_state.df[['title', 'source', 'year']].head(10))
         
         st.markdown("---")
         st.markdown("**📌 Próximos passos recomendados:**")
         st.markdown("""
         - Refine sua query e repita a coleta.
-        - Use o chat RAG (se configurado) para perguntas específicas.
+        - Use o chat RAG (acima) para perguntas específicas sobre o corpus.
         - Exporte os dados e grafos para publicações.
         - Considere expandir o período ou incluir outras fontes.
         """)
-        
-        st.markdown("---")
-        render_rag_chat(st.session_state.df)
         
         if st.button("🔄 Recomeçar do início"):
             for key in list(st.session_state.keys()):

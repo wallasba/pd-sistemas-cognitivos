@@ -12,41 +12,63 @@ def render_rag_chat(df):
         st.info("Carregue um corpus para usar o chat RAG.")
         return
 
-    # Verifica se a chave está disponível no session_state ou ambiente
-    groq_api_key = st.session_state.get("groq_api_key") or os.getenv("GROQ_API_KEY")
-    if not groq_api_key:
-        st.warning("⚠️ Chave da API Groq não encontrada. Configure-a na barra lateral.")
-        return
-
     if st.session_state.rag_pipeline is None:
         with st.spinner("Carregando pipeline RAG (embeddings + Groq)..."):
             temp_csv = tempfile.NamedTemporaryFile(suffix=".csv", delete=False)
             df[['title', 'abstract_clean', 'source', 'year']].to_csv(temp_csv.name, index=False)
             temp_csv.close()
             try:
+                groq_api_key = st.session_state.get("groq_api_key") or os.getenv("GROQ_API_KEY")
+                if not groq_api_key:
+                    st.warning("⚠️ Chave da API Groq não encontrada. Configure-a na barra lateral.")
+                    return
+
                 st.session_state.rag_pipeline = RAGPipeline(
                     corpus_path=temp_csv.name,
                     text_column='abstract_clean',
                     embedding_model_name="all-MiniLM-L6-v2",
                     k_retrieval=10,
                     groq_api_key=groq_api_key,
-                    api_model="llama-3.1-8b-instant",  # ou "llama-3.3-70b-versatile"
+                    api_model="llama-3.1-8b-instant",
                     response_language="português"
                 )
                 st.success("Pipeline RAG carregado (Groq)!")
-                years = st.session_state.rag_pipeline.df['year'].dropna().unique()
-                st.info(f"📊 Anos disponíveis: {sorted(years)}")
+                
+                # ===== MENSAGEM REMOVIDA =====
+                # A exibição dos anos foi removida para não poluir a interface.
+                # ================================
+                
             except Exception as e:
                 st.error(f"Erro: {e}")
                 return
 
-    # Perguntas de exemplo (mantido)
+    # Perguntas de exemplo
     question_masks = [
-        "Quais são os desafios éticos mencionados nos artigos?",
+        # ===== ANÁLISE TEMPORAL =====
+        "Quais são os anos disponíveis no corpus?",
+        "Qual a distribuição temporal dos artigos?",
+        "Quantos artigos foram publicados em 2023?",
+        "Qual o artigo mais recente do corpus?",
+        
+        # ===== MÉTRICAS GERAIS =====
+        "Quantos artigos o corpus contém?",
+        "Quais são as principais fontes (repositórios) dos artigos?",
+        "Quantos autores únicos existem no corpus?",
+        "Quem são os autores mais frequentes?",
+        
+        # ===== ANÁLISE TEMÁTICA =====
+        "Quais são os principais temas abordados nos artigos?",
         "Quais as tendências recentes (2026) em IA?",
-        "qual o impacto da ia na engenharia de transportes?",
         "Quais são as principais aplicações da IA mencionadas?",
-        "qual o artigo mais recente do corpus?"
+        
+        # ===== ANÁLISE ÉTICA E DESAFIOS =====
+        "Quais são os desafios éticos mencionados nos artigos?",
+        "Quais são as principais limitações da IA citadas?",
+        
+        # ===== ANÁLISE POR ÁREA (exemplos personalizáveis) =====
+        "Qual o impacto da IA na engenharia de transportes?",
+        "Como a IA está sendo aplicada na área da saúde?",
+        "Quais são as principais colaborações institucionais mencionadas?"
     ]
     selected_question = st.selectbox("Escolha uma pergunta de exemplo (ou digite a sua):",
                                      ["(Digitar própria)"] + question_masks)

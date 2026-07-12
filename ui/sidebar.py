@@ -43,12 +43,33 @@ def render_sidebar():
     st.sidebar.divider()
     
     # ============================================================
-    # ESTATÍSTICAS DO CORPUS (se carregado)
+    # ESTATÍSTICAS DO CORPUS E ATALHOS
     # ============================================================
     if st.session_state.df is not None and not st.session_state.df.empty:
         st.sidebar.metric("📄 Artigos carregados", len(st.session_state.df))
         if st.session_state.research_context:
             st.sidebar.caption(f"Tema: {st.session_state.research_context[:50]}...")
+        
+        st.sidebar.divider()
+        
+        # ============================================================
+        # ATALHOS RÁPIDOS
+        # ============================================================
+        st.sidebar.markdown("**⚡ Atalhos**")
+        
+        # Botão para Análise (Etapa 4)
+        if st.session_state.step != 4:
+            if st.sidebar.button("📊 Ir para Análise", use_container_width=True):
+                st.session_state.step = 4
+                st.rerun()
+        
+        # Botão para Chat RAG (Etapa 5 – Resumo)
+        if st.session_state.step != 5:
+            if st.sidebar.button("💬 Ir para o Chat RAG", use_container_width=True, type="primary"):
+                st.session_state.step = 5
+                st.rerun()
+        else:
+            st.sidebar.success("✅ Você está no Chat RAG")
     
     st.sidebar.divider()
     

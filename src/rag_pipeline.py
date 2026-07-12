@@ -239,6 +239,45 @@ class RAGPipeline:
         if "quantos artigos" in q_lower or "total de artigos" in q_lower:
             return {"answer": self._get_total_articles(), "retrieved_context": [], "metadata": {"type": "factual"}}
 
+        # ===== NOVAS RESPOSTAS FACTUAIS =====
+        # 1. Anos disponíveis
+        if "anos disponíveis" in q_lower or "quais os anos" in q_lower or "intervalo de anos" in q_lower or "distribuição temporal" in q_lower:
+            if 'year' in self.df.columns:
+                anos = sorted(self.df['year'].dropna().unique())
+                if anos:
+                    resposta = f"O corpus contém artigos publicados entre **{int(min(anos))}** e **{int(max(anos))}**. Anos disponíveis: {', '.join(str(int(a)) for a in anos)}"
+                else:
+                    resposta = "Não há informações de ano no corpus."
+                return {"answer": resposta, "retrieved_context": [], "metadata": {"type": "factual"}}
+
+        # 2. Total de autores únicos
+        if "quantos autores" in q_lower or "total de autores" in q_lower or "autores únicos" in q_lower:
+            if 'authors' in self.df.columns:
+                all_authors = []
+                for _, row in self.df.iterrows():
+                    authors = row.get('authors', '')
+                    if authors:
+                        all_authors.extend([a.strip() for a in authors.split(',') if a.strip()])
+                unique_authors = len(set(all_authors))
+                resposta = f"O corpus contém **{unique_authors}** autores únicos."
+                return {"answer": resposta, "retrieved_context": [], "metadata": {"type": "factual"}}
+
+        # 3. Fontes (repositórios)
+        if "quais as fontes" in q_lower or "repositórios" in q_lower or "distribuição por fonte" in q_lower:
+            if 'source' in self.df.columns:
+                sources = self.df['source'].value_counts()
+                lines = [f"- **{s}**: {c} artigos" for s, c in sources.items()]
+                resposta = "Distribuição por fonte:\n" + "\n".join(lines)
+                return {"answer": resposta, "retrieved_context": [], "metadata": {"type": "factual"}}
+
+        # 4. Média de artigos por ano
+        if "média de artigos por ano" in q_lower or "artigos por ano" in q_lower:
+            if 'year' in self.df.columns:
+                avg = self.df['year'].value_counts().mean()
+                resposta = f"A média de artigos publicados por ano é **{avg:.1f}**."
+                return {"answer": resposta, "retrieved_context": [], "metadata": {"type": "factual"}}
+        
+        
         # RAG
         result = self._answer_with_rag(query)
         return {
