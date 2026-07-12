@@ -1,4 +1,4 @@
-# 🧠 Assistente de Pesquisa Científica com RAG
+# 1. Assistente de Pesquisa Científica com RAG
 
 [![Streamlit](https://img.shields.io/badge/Streamlit-1.37.0-FF4B4B?style=flat-square&logo=streamlit)](https://streamlit.io)
 [![Python](https://img.shields.io/badge/Python-3.12+-3776AB?style=flat-square&logo=python)](https://python.org)
@@ -73,3 +73,50 @@ A aplicação permite que o pesquisador faça perguntas em linguagem natural e o
 ```bash
 git clone https://github.com/wallasb85/apd-sistemas-cognitivos.git
 cd apd-sistemas-cognitivos
+```
+### 2. Crie e ative um ambiente virtual
+```bash
+python -m venv .venv
+source .venv/bin/activate      # Linux/Mac
+.venv\Scripts\activate         # Windows
+```
+
+### 3. Instale as dependências
+```bash
+pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+### 4. Configure a chave da API Groq
+
+```bash
+GROQ_API_KEY=sua_chave_aqui
+```
+
+### Executando a Aplicação
+
+```bash
+Gstreamlit run app.py
+```
+
+#Como Usar
+## Etapas do Wizard
+1. Definição do Problema – descreva seu tema e área de pesquisa.
+2. Objetivos e Hipóteses – defina objetivos e hipóteses com sugestões automáticas.
+3. Estratégia de Busca – construa a query booleana, selecione fontes, período e limite.
+4. Análise Exploratória – visualize estatísticas, nuvem de palavras, grafos e estatísticas de rede.
+5. Resumo e Chat RAG – faça perguntas em linguagem natural sobre o corpus.
+
+## Atalhos Rápidos
+1. Na barra lateral: após carregar o corpus, botões para Ir para Análise e Ir para o Chat RAG.
+2. Na Etapa 4: botão "💬 Ir para o Chat RAG" para pular diretamente para as perguntas.
+
+## Upload de Corpus Próprio
+Na barra lateral, você pode carregar um arquivo CSV, XLS ou XLSX com as colunas:
+
+1. title (texto)
+2. abstract (texto)
+3. source (texto)
+4. year (inteiro)
+5. authors (texto, separados por vírgula)
+6. affiliations (texto, separados por ;)
