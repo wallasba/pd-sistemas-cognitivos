@@ -99,7 +99,7 @@ GROQ_API_KEY=sua_chave_aqui
 Gstreamlit run app.py
 ```
 
-#Como Usar
+# Como Usar
 ## Etapas do Wizard
 1. Definição do Problema – descreva seu tema e área de pesquisa.
 2. Objetivos e Hipóteses – defina objetivos e hipóteses com sugestões automáticas.
@@ -120,3 +120,42 @@ Na barra lateral, você pode carregar um arquivo CSV, XLS ou XLSX com as colunas
 4. year (inteiro)
 5. authors (texto, separados por vírgula)
 6. affiliations (texto, separados por ;)
+
+# Estrutura do Projeto
+
+```bash
+assistente-pesquisa-rag/
+├── app.py                          # Ponto de entrada da aplicação
+├── src/                            # Lógica de negócio
+│   ├── data_collector.py           # Coleta de artigos via APIs
+│   ├── preprocessor.py             # Limpeza e lematização
+│   ├── analyzer.py                 # Estatísticas e nuvem de palavras
+│   ├── graph_builder.py            # Construção de grafos e estatísticas
+│   ├── recommender.py              # Sugestões de objetivos e hipóteses
+│   └── rag_pipeline.py             # Pipeline RAG completo
+├── ui/                             # Interface Streamlit
+│   ├── sidebar.py                  # Barra lateral (upload, API key, atalhos)
+│   ├── wizard.py                   # Wizard de 5 etapas
+│   ├── analysis.py                 # Visualizações descritivas
+│   ├── graph_viewer.py             # Exibição de grafos estáticos
+│   └── rag_chat.py                 # Chat RAG interativo
+├── notebooks/                      # Notebooks demonstrativos (c01 a c05)
+├── data/                           # (Opcional) para armazenar corpus
+├── requirements.txt                # Dependências
+├── .env.example                    # Exemplo de variáveis de ambiente
+└── README.md                       # Este arquivo
+```
+
+# Notebooks Demonstrativos
+A pasta notebooks/ contém 5 notebooks que demonstram cada competência do projeto:
+
+## Notebook	Conteúdo
+
+```bash
+c01_modelos_llm.ipynb	Uso da API Groq, comparação de temperatura e modelos disponíveis.
+c02_prompting.ipynb	Comparação de zero‑shot, few‑shot e chain‑of‑thought.
+c03_embeddings_busca.ipynb	Geração de embeddings, indexação FAISS e busca semântica.
+c04_inferencia_local_remota.ipynb	Comparação entre inferência local e remota (Groq).
+c05_rag_pipeline.ipynb	Pipeline RAG completo, com e sem contexto.
+Execute-os em ordem para validar o funcionamento de cada componente.
+```
